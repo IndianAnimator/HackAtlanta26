@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Melody Generator</title>
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+
+  <!-- Tailwind CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            display: ['"Space Grotesk"', 'sans-serif'],
+            body: ['Inter', 'sans-serif'],
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- Magenta via CDN — exposes window.core -->
+  <script src="https://cdn.jsdelivr.net/npm/@magenta/music@1.23.1/es5/core.js"></script>
+
+  <!-- Tone.js v14 via CDN — exposes window.Tone -->
+  <script src="https://unpkg.com/tone@14/build/Tone.js"></script>
+
+  <style>
+    /* ─── Reset & base ─── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #0a0a14;
+      font-family: 'Inter', sans-serif;
+      color: #e2e8f0;
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ─── Background bloom layers ─── */
+    .bg-bloom {
+      position: fixed; inset: 0; pointer-events: none; z-index: 0;
+      background:
+        radial-gradient(ellipse 100% 55% at 50% -5%,  rgba(109,40,217,.28) 0%, transparent 65%),
+        radial-gradient(ellipse  60% 50% at 92% 65%,  rgba(6,182,212,.10)  0%, transparent 55%),
+        radial-gradient(ellipse  55% 60% at  8% 88%,  rgba(109,40,217,.08) 0%, transparent 55%);
+    }
+
+    /* ─── Gradient text ─── */
+    .gradient-text {
+      background: linear-gradient(135deg, #a78bfa 0%, #7c3aed 35%, #06b6d4 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    /* ─── Badge chip ─── */
+    .badge {
+      display: inline-flex; align-items: center; gap: .4rem;
+      font-size: .68rem; font-weight: 600; letter-spacing: .1em;
+      text-transform: uppercase; color: #a78bfa;
+      background: rgba(124,58,237,.1); border: 1px solid rgba(124,58,237,.22);
+      border-radius: 50px; padding: .3rem .9rem;
+    }
+
+    /* ─── Controls card with gradient border ─── */
+    .card {
+      position: relative;
+      background: rgba(14,14,28,.75);
+      border-radius: 24px;
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      box-shadow:
+        0 1px 0 rgba(255,255,255,.05) inset,
+        0 24px 64px rgba(0,0,0,.45),
+        0  8px 24px rgba(0,0,0,.25);
+    }
+    .card::before {
+      content: '';
+      position: absolute; inset: 0;
+      border-radius: 24px; padding: 1px;
+      background: linear-gradient(135deg, rgba(124,58,237,.55) 0%, rgba(124,58,237,.12) 45%, rgba(6,182,212,.28) 100%);
+      -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+      -webkit-mask-composite: xor; mask-composite: exclude;
+      pointer-events: none;
+    }
+
+    /* ─── Form controls ─── */
+    .field-label {
+      font-size: .68rem; font-weight: 600; letter-spacing: .1em;
+      text-transform: uppercase; color: #475569;
+      display: flex; align-items: center; gap: .5rem;
+    }
+    .field-select, .field-input {
+      background: rgba(255,255,255,.04);
+      border: 1px solid rgba(255,255,255,.08);
+      border-radius: 50px;
+      padding: .625rem 1.125rem;
+      color: #e2e8f0; font-size: .875rem;
+      font-family: 'Inter', sans-serif;
+      outline: none; width: 100%;
+      transition: border-color .2s, box-shadow .2s;
+    }
+    .field-select:hover:not(:disabled),
+    .field-input:hover:not(:disabled)  { border-color: rgba(255,255,255,.14); }
+    .field-select:focus, .field-input:focus {
+      border-color: #7c3aed;
+      box-shadow: 0 0 0 3px rgba(124,58,237,.18), 0 0 14px rgba(124,58,237,.08);
+    }
+    .field-select option { background: #12121f; color: #e2e8f0; }
+    .field-select:disabled, .field-input:disabled { opacity: .4; cursor: not-allowed; }
+
+    /* ─── Range slider ─── */
+    input[type="range"] {
+      -webkit-appearance: none; appearance: none;
+      width: 100%; height: 5px; border-radius: 3px;
+      background: rgba(255,255,255,.08); outline: none; cursor: pointer;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 20px; height: 20px; border-radius: 50%;
+      background: linear-gradient(135deg, #7c3aed, #06b6d4);
+      cursor: pointer;
+      box-shadow: 0 0 12px rgba(124,58,237,.65);
+      transition: transform .15s cubic-bezier(.34,1.56,.64,1);
+    }
+    input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.2); }
+    input[type="range"]::-moz-range-thumb {
+      width: 20px; height: 20px; border-radius: 50%; border: none;
+      background: linear-gradient(135deg, #7c3aed, #06b6d4);
+      box-shadow: 0 0 12px rgba(124,58,237,.65);
+    }
+    input[type="range"]:disabled { opacity: .35; cursor: not-allowed; }
+
+    /* ─── Buttons ─── */
+    .btn-generate {
+      background: linear-gradient(135deg, #7c3aed 0%, #0891b2 100%);
+      border: none; border-radius: 50px; color: #fff;
+      font-size: .95rem; font-weight: 700; font-family: 'Space Grotesk', sans-serif;
+      letter-spacing: .01em; cursor: pointer;
+      padding: .9rem 2rem; position: relative; overflow: hidden;
+      transition: transform .18s cubic-bezier(.34,1.56,.64,1), box-shadow .2s, opacity .15s;
+      box-shadow: 0 4px 20px rgba(124,58,237,.4), 0 2px 8px rgba(0,0,0,.3), 0 1px 0 rgba(255,255,255,.12) inset;
+    }
+    .btn-generate::before {
+      content: ''; position: absolute; inset: 0; border-radius: 50px;
+      background: linear-gradient(135deg, rgba(255,255,255,.18) 0%, transparent 55%);
+      opacity: 0; transition: opacity .2s;
+    }
+    .btn-generate:hover:not(:disabled)::before { opacity: 1; }
+    .btn-generate:hover:not(:disabled) {
+      transform: translateY(-2px);
+      box-shadow: 0 10px 32px rgba(124,58,237,.55), 0 0 22px rgba(6,182,212,.22), 0 4px 12px rgba(0,0,0,.4);
+    }
+    .btn-generate:active:not(:disabled) { transform: translateY(1px); }
+    .btn-generate:disabled { opacity: .5; cursor: not-allowed; }
+
+    .btn-play {
+      background: rgba(6,182,212,.08); border: 1.5px solid rgba(6,182,212,.5);
+      border-radius: 50px; color: #22d3ee;
+      font-size: .95rem; font-weight: 700; font-family: 'Space Grotesk', sans-serif;
+      padding: .9rem 2rem; cursor: pointer;
+      transition: transform .18s cubic-bezier(.34,1.56,.64,1), box-shadow .2s, background .15s, border-color .15s;
+    }
+    .btn-play:hover {
+      background: rgba(6,182,212,.15); border-color: #06b6d4;
+      box-shadow: 0 0 22px rgba(6,182,212,.28); transform: translateY(-1px);
+    }
+    .btn-play:active { transform: translateY(1px); }
+
+    .btn-stop {
+      background: rgba(239,68,68,.08); border: 1.5px solid rgba(239,68,68,.45);
+      border-radius: 50px; color: #fca5a5;
+      font-size: .95rem; font-weight: 700; font-family: 'Space Grotesk', sans-serif;
+      padding: .9rem 2rem; cursor: pointer;
+      transition: transform .18s cubic-bezier(.34,1.56,.64,1), box-shadow .2s, background .15s;
+    }
+    .btn-stop:hover {
+      background: rgba(239,68,68,.15);
+      box-shadow: 0 0 22px rgba(239,68,68,.25); transform: translateY(-1px);
+    }
+    .btn-stop:active { transform: translateY(1px); }
+
+    /* ─── Piano roll canvas ─── */
+    #piano-roll {
+      border-radius: 16px; display: block; max-width: 100%;
+      box-shadow:
+        0 0 0 1px rgba(124,58,237,.18),
+        0 0  50px rgba(124,58,237,.18),
+        0 0 100px rgba(6,182,212,.07),
+        0 28px 70px rgba(0,0,0,.55);
+    }
+    #piano-placeholder {
+      border-radius: 16px; width: 100%; height: 300px;
+      background: linear-gradient(160deg, #12122a, #0e0e22);
+      border: 1px dashed rgba(124,58,237,.2);
+      display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 0 0 1px rgba(124,58,237,.08), 0 28px 70px rgba(0,0,0,.45);
+    }
+
+    /* ─── Loading dots ─── */
+    @keyframes dotPulse {
+      0%, 80%, 100% { transform: scale(.55); opacity: .3; }
+      40%           { transform: scale(1.1);  opacity: 1; }
+    }
+    .dot { animation: dotPulse 1.4s ease-in-out infinite both; }
+    .dot:nth-child(2) { animation-delay: .18s; }
+    .dot:nth-child(3) { animation-delay: .36s; }
+
+    /* ─── Spinner ─── */
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinner {
+      display: inline-block; width: 14px; height: 14px;
+      border: 2px solid rgba(255,255,255,.25); border-top-color: #fff;
+      border-radius: 50%; animation: spin .65s linear infinite; vertical-align: middle;
+    }
+  </style>
+</head>
+
+<body>
+  <!-- Background bloom -->
+  <div class="bg-bloom"></div>
+
+  <!-- App shell -->
+  <div class="relative z-10 flex flex-col items-center min-h-screen">
+
+    <!-- Header -->
+    <header class="text-center pt-14 pb-6 px-4 flex flex-col items-center gap-3">
+      <div class="badge">✦ Generative AI · MelodyRNN</div>
+      <h1 class="font-display gradient-text font-extrabold tracking-tight leading-none"
+          style="font-size:clamp(2.4rem,5vw,3.5rem)">
+        🎵 AI Melody Generator
+      </h1>
+      <p class="text-slate-500 text-sm max-w-xs leading-relaxed">
+        Compose unique melodies with neural networks, right in your browser
+      </p>
+    </header>
+
+    <!-- Loading banner -->
+    <div id="loading-banner"
+         class="hidden items-center gap-3 text-violet-300 text-sm px-5 py-2.5 mb-2 mx-4 rounded-xl"
+         style="background:rgba(124,58,237,.08);border:1px solid rgba(124,58,237,.2)">
+      <div class="flex gap-1.5 items-center">
+        <div class="dot w-1.5 h-1.5 rounded-full bg-violet-500"></div>
+        <div class="dot w-1.5 h-1.5 rounded-full bg-violet-500"></div>
+        <div class="dot w-1.5 h-1.5 rounded-full bg-violet-500"></div>
+      </div>
+      <span>Loading AI model…</span>
+    </div>
+
+    <!-- Main content -->
+    <main class="flex flex-col items-center gap-8 px-4 pb-16 w-full" style="max-width:880px">
+
+      <!-- Controls card -->
+      <div class="card w-full p-8">
+
+        <!-- Three field columns -->
+        <div class="flex flex-wrap gap-6 mb-7">
+
+          <!-- Mood / Genre -->
+          <div class="flex flex-col gap-2 flex-1" style="min-width:140px">
+            <label class="field-label" for="mood-select">Mood / Genre</label>
+            <select id="mood-select" class="field-select">
+              <option value="pop">Pop</option>
+              <option value="jazz">Jazz</option>
+              <option value="classical">Classical</option>
+              <option value="lo-fi">Lo-Fi</option>
+              <option value="random">Random</option>
+            </select>
+          </div>
+
+          <!-- Seed Notes -->
+          <div class="flex flex-col gap-2 flex-1" style="min-width:140px">
+            <label class="field-label" for="seed-input">
+              Seed Notes
+              <span style="font-size:.65rem;color:#334155;font-weight:400;text-transform:none;letter-spacing:0">
+                Optional: 1–3 notes
+              </span>
+            </label>
+            <input id="seed-input" type="text" placeholder="e.g. C4 E4 G4" class="field-input" />
+          </div>
+
+          <!-- Tempo -->
+          <div class="flex flex-col gap-2 flex-1" style="min-width:140px">
+            <label class="field-label" for="tempo-slider">
+              Tempo
+              <span id="bpm-display"
+                    style="font-size:.82rem;color:#06b6d4;font-weight:700;font-variant-numeric:tabular-nums;text-transform:none;letter-spacing:0">
+                120 BPM
+              </span>
+            </label>
+            <input id="tempo-slider" type="range" min="60" max="180" value="120" />
+          </div>
+        </div>
+
+        <!-- Action buttons -->
+        <div class="flex gap-3 flex-wrap items-center">
+          <button id="generate-btn" class="btn-generate" style="flex:1;min-width:200px">
+            ✨ Generate Melody
+          </button>
+          <button id="play-btn" class="btn-play hidden">▶ Play</button>
+          <button id="stop-btn" class="btn-stop hidden">⏹ Stop</button>
+        </div>
+      </div>
+
+      <!-- Piano roll -->
+      <div class="w-full flex justify-center">
+        <div id="piano-placeholder">
+          <div class="flex flex-col items-center gap-3 select-none" style="opacity:.35">
+            <span style="font-size:2.75rem;filter:grayscale(1)">🎹</span>
+            <p style="color:#475569;font-size:.875rem;letter-spacing:.02em">
+              Generate a melody to see the piano roll
+            </p>
+          </div>
+        </div>
+        <canvas id="piano-roll" class="hidden" height="300"></canvas>
+      </div>
+
+    </main>
+
+    <footer class="mt-auto pb-6 text-center"
+            style="font-size:.72rem;color:#1e293b;letter-spacing:.12em;text-transform:uppercase">
+      Built at HackAtlanta 2026
+    </footer>
+  </div>
+
+  <script>
+    // ─── Constants ───────────────────────────────────────────────────────────
+    const CHECKPOINT = 'https://storage.googleapis.com/magentadata/js/checkpoints/melody_rnn/basic_rnn';
+    const MIN_PITCH = 48, MAX_PITCH = 84;
+    const PITCH_RANGE = MAX_PITCH - MIN_PITCH + 1; // 37
+    const BLACK_KEYS = new Set([1, 3, 6, 8, 10]);
+    const NOTE_COLORS = [
+      '#ef4444','#f87171','#f97316','#fb923c','#eab308',
+      '#22c55e','#4ade80','#06b6d4','#22d3ee','#3b82f6','#818cf8','#a855f7'
+    ];
+    const MOOD_TEMP = { jazz:1.2, classical:0.8, 'lo-fi':1.0, pop:0.9, random:1.5 };
+    const NOTE_MAP  = { C:0, D:2, E:4, F:5, G:7, A:9, B:11 };
+    const STUB = {
+      notes: [
+        {pitch:60,startTime:0.0,endTime:0.5},{pitch:62,startTime:0.5,endTime:1.0},
+        {pitch:64,startTime:1.0,endTime:1.5},{pitch:65,startTime:1.5,endTime:2.0},
+        {pitch:67,startTime:2.0,endTime:2.5},{pitch:69,startTime:2.5,endTime:3.0},
+        {pitch:71,startTime:3.0,endTime:3.5},{pitch:72,startTime:3.5,endTime:4.0},
+      ],
+      totalTime: 4.0,
+    };
+
+    // ─── State ───────────────────────────────────────────────────────────────
+    let model = null, noteSeq = null;
+    let isPlaying = false, activeNote = null;
+    let activePart = null, activeSynth = null;
+    let completeTimer = null, rafId = null;
+
+    // ─── DOM refs ─────────────────────────────────────────────────────────────
+    const $ = id => document.getElementById(id);
+    const loadingBanner = $('loading-banner');
+    const generateBtn   = $('generate-btn');
+    const playBtn       = $('play-btn');
+    const stopBtn       = $('stop-btn');
+    const moodSel       = $('mood-select');
+    const seedInput     = $('seed-input');
+    const tempoSlider   = $('tempo-slider');
+    const bpmDisplay    = $('bpm-display');
+    const canvas        = $('piano-roll');
+    const placeholder   = $('piano-placeholder');
+    const ctx           = canvas.getContext('2d');
+
+    // ─── Canvas sizing ────────────────────────────────────────────────────────
+    function sizeCanvas() {
+      const w = Math.min(window.innerWidth - 32, 840);
+      canvas.width = w;
+      if (noteSeq) drawCanvas();
+    }
+    window.addEventListener('resize', sizeCanvas);
+    sizeCanvas();
+
+    // ─── Tempo slider ─────────────────────────────────────────────────────────
+    tempoSlider.addEventListener('input', () => {
+      bpmDisplay.textContent = tempoSlider.value + ' BPM';
+    });
+
+    // ─── Parse seed notes (C4 E4 G4 → MIDI) ─────────────────────────────────
+    function parseNotes(text) {
+      return text.trim().toUpperCase().split(/\s+/).filter(Boolean)
+        .map(t => {
+          const m = t.match(/^([A-G])(\d)$/);
+          return m ? (parseInt(m[2]) + 1) * 12 + NOTE_MAP[m[1]] : null;
+        })
+        .filter(n => n !== null)
+        .slice(0, 3);
+    }
+
+    // ─── Model init ───────────────────────────────────────────────────────────
+    async function initModel() {
+      loadingBanner.classList.remove('hidden');
+      loadingBanner.classList.add('flex');
+      generateBtn.disabled = true;
+
+      if (!window.core) {
+        console.warn('Magenta CDN not ready — stub mode');
+        finishLoad(null); return;
+      }
+      try {
+        const m = new window.core.MelodyRNN(CHECKPOINT);
+        await m.initialize();
+        finishLoad(m);
+      } catch (e) {
+        console.error('Model init failed:', e);
+        finishLoad(null);
+      }
+    }
+
+    function finishLoad(m) {
+      model = m;
+      loadingBanner.classList.add('hidden');
+      loadingBanner.classList.remove('flex');
+      generateBtn.disabled = false;
+    }
+
+    // ─── Generate ─────────────────────────────────────────────────────────────
+    async function generate() {
+      setGenerating(true);
+
+      const mood      = moodSel.value;
+      const seedNotes = parseNotes(seedInput.value);
+      const temp      = MOOD_TEMP[mood] ?? 1.0;
+
+      if (!model || !window.core) {
+        await new Promise(r => setTimeout(r, 500));
+        noteSeq = STUB;
+        setGenerating(false);
+        showRoll(); return;
+      }
+
+      const seeds = seedNotes.length ? seedNotes : [60];
+      const seedObjs = seeds.map((p, i) => ({
+        pitch: p, startTime: i * 0.5, endTime: (i + 1) * 0.5, velocity: 80,
+      }));
+      const seedSeq = {
+        notes: seedObjs,
+        totalTime: seedObjs[seedObjs.length - 1].endTime,
+        tempos: [{ time: 0, qpm: 120 }],
+        quantizationInfo: { stepsPerQuarter: 4 },
+      };
+
+      try {
+        const q = window.core.sequences.quantizeNoteSequence(seedSeq, 4);
+        noteSeq = await model.continueSequence(q, 32, temp);
+      } catch (e) {
+        console.error('Generation failed:', e);
+        noteSeq = STUB;
+      }
+
+      setGenerating(false);
+      showRoll();
+    }
+
+    function setGenerating(on) {
+      generateBtn.disabled = on;
+      generateBtn.innerHTML = on
+        ? '<span class="spinner"></span>&nbsp; Generating…'
+        : '✨ Generate Melody';
+    }
+
+    function showRoll() {
+      placeholder.classList.add('hidden');
+      canvas.classList.remove('hidden');
+      playBtn.classList.remove('hidden');
+      stopBtn.classList.add('hidden');
+      sizeCanvas();
+      drawCanvas();
+    }
+
+    // ─── Playback ─────────────────────────────────────────────────────────────
+    async function play() {
+      if (!noteSeq) return;
+      try { await Tone.start(); } catch (e) { console.error(e); }
+      stopPlayback();
+
+      const tempo     = parseInt(tempoSlider.value);
+      const timeScale = 120 / tempo;
+      const notes     = noteSeq.notes ?? [];
+      if (!notes.length) return;
+
+      activeSynth = new Tone.PolySynth(Tone.Synth, {
+        oscillator: { type: 'triangle' },
+        envelope: { attack: 0.02, decay: 0.1, sustain: 0.5, release: 0.8 },
+      }).toDestination();
+
+      const events = notes.map(n => ({
+        time:     n.startTime * timeScale,
+        pitch:    n.pitch,
+        duration: (n.endTime - n.startTime) * timeScale,
+      }));
+      const lastEnd = Math.max(...notes.map(n => n.endTime)) * timeScale;
+
+      activePart = new Tone.Part((time, ev) => {
+        activeSynth.triggerAttackRelease(
+          Tone.Frequency(ev.pitch, 'midi').toFrequency(),
+          ev.duration, time
+        );
+        const delay = Math.max(0, (time - Tone.now()) * 1000);
+        setTimeout(() => {
+          activeNote = ev.pitch; drawCanvas();
+          setTimeout(() => { activeNote = null; drawCanvas(); }, ev.duration * 1000);
+        }, delay);
+      }, events);
+
+      activePart.start(0);
+      Tone.Transport.start();
+
+      isPlaying = true;
+      playBtn.classList.add('hidden');
+      stopBtn.classList.remove('hidden');
+
+      completeTimer = setTimeout(() => {
+        isPlaying = false; activeNote = null;
+        playBtn.classList.remove('hidden');
+        stopBtn.classList.add('hidden');
+        cancelAnimationFrame(rafId);
+        drawCanvas();
+      }, (lastEnd + 0.4) * 1000);
+
+      // Animate playhead
+      ;(function loop() {
+        if (!isPlaying) return;
+        drawCanvas();
+        rafId = requestAnimationFrame(loop);
+      })();
+    }
+
+    function stopPlayback() {
+      Tone.Transport.stop();
+      Tone.Transport.cancel();
+      clearTimeout(completeTimer);
+      cancelAnimationFrame(rafId);
+      if (activePart)  { activePart.dispose();  activePart  = null; }
+      if (activeSynth) { activeSynth.dispose(); activeSynth = null; }
+    }
+
+    function stop() {
+      stopPlayback();
+      isPlaying = false; activeNote = null;
+      playBtn.classList.remove('hidden');
+      stopBtn.classList.add('hidden');
+      drawCanvas();
+    }
+
+    // ─── Canvas draw ──────────────────────────────────────────────────────────
+    function drawCanvas() {
+      const W = canvas.width, H = canvas.height;
+      const laneH = H / PITCH_RANGE;
+
+      // Background
+      ctx.fillStyle = '#1a1a2e';
+      ctx.fillRect(0, 0, W, H);
+
+      // Pitch lanes
+      for (let p = MIN_PITCH; p <= MAX_PITCH; p++) {
+        const pc = p % 12, isBlack = BLACK_KEYS.has(pc);
+        const y = H - (p - MIN_PITCH + 1) * laneH;
+        ctx.fillStyle = isBlack ? '#13132a' : '#1e1e3f';
+        ctx.fillRect(0, y, W, laneH);
+        if (pc === 0) {
+          ctx.fillStyle = 'rgba(124,58,237,.07)';
+          ctx.fillRect(0, y, W, laneH);
+        }
+        ctx.fillStyle = 'rgba(255,255,255,.025)';
+        ctx.fillRect(0, y + laneH - 1, W, 1);
+      }
+
+      // Notes
+      if (noteSeq?.notes?.length) {
+        const total = noteSeq.totalTime || 4;
+        noteSeq.notes.forEach(note => {
+          if (note.pitch < MIN_PITCH || note.pitch > MAX_PITCH) return;
+          const pc       = note.pitch % 12;
+          const color    = NOTE_COLORS[pc];
+          const isActive = note.pitch === activeNote;
+          const x  = (note.startTime / total) * W;
+          const nW = Math.max(3, ((note.endTime - note.startTime) / total) * W - 2);
+          const y  = H - (note.pitch - MIN_PITCH + 1) * laneH + 1;
+          const nH = laneH - 2;
+
+          ctx.shadowColor = isActive ? '#fff' : color;
+          ctx.shadowBlur  = isActive ? 14 : 5;
+          ctx.fillStyle   = isActive ? '#fff' : color;
+          ctx.beginPath();
+          if (ctx.roundRect) ctx.roundRect(x, y, nW, nH, 2);
+          else ctx.rect(x, y, nW, nH);
+          ctx.fill();
+          ctx.shadowBlur = 0;
+
+          if (isActive) {
+            ctx.strokeStyle = 'rgba(255,255,255,.8)';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            if (ctx.roundRect) ctx.roundRect(x - 1, y - 1, nW + 2, nH + 2, 3);
+            else ctx.rect(x - 1, y - 1, nW + 2, nH + 2);
+            ctx.stroke();
+          }
+        });
+      }
+
+      // Playhead
+      if (isPlaying) {
+        const tempo     = parseInt(tempoSlider.value);
+        const scaledEnd = (noteSeq?.totalTime || 4) * (120 / tempo);
+        const px        = Math.min((Tone.Transport.seconds / scaledEnd) * W, W);
+        ctx.save();
+        ctx.strokeStyle = 'rgba(255,255,255,.85)';
+        ctx.lineWidth   = 2;
+        ctx.shadowColor = '#fff'; ctx.shadowBlur = 10;
+        ctx.beginPath(); ctx.moveTo(px, 0); ctx.lineTo(px, H); ctx.stroke();
+        ctx.restore();
+      }
+    }
+
+    // ─── Wire up buttons ─────────────────────────────────────────────────────
+    generateBtn.addEventListener('click', generate);
+    playBtn.addEventListener('click', play);
+    stopBtn.addEventListener('click', stop);
+
+    // ─── Boot ─────────────────────────────────────────────────────────────────
+    initModel();
+  </script>
+</body>
+</html>
