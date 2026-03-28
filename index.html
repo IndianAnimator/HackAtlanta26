@@ -25,9 +25,6 @@
     }
   </script>
 
-  <!-- Magenta via CDN — exposes window.core -->
-  <script src="https://cdn.jsdelivr.net/npm/@magenta/music@1.23.1/es5/core.js"></script>
-
   <!-- Tone.js v14 via CDN — exposes window.Tone -->
   <script src="https://unpkg.com/tone@14/build/Tone.js"></script>
 
@@ -86,6 +83,7 @@
       border-radius: 24px; padding: 1px;
       background: linear-gradient(135deg, rgba(124,58,237,.55) 0%, rgba(124,58,237,.12) 45%, rgba(6,182,212,.28) 100%);
       -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+      mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
       -webkit-mask-composite: xor; mask-composite: exclude;
       pointer-events: none;
     }
@@ -253,6 +251,14 @@
       <span>Loading AI model…</span>
     </div>
 
+    <!-- Error banner -->
+    <div id="error-banner"
+         class="hidden items-center gap-2 text-red-300 text-sm px-5 py-2.5 mb-2 mx-4 rounded-xl"
+         style="background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.25)">
+      <span>⚠</span>
+      <span id="error-text"></span>
+    </div>
+
     <!-- Main content -->
     <main class="flex flex-col items-center gap-8 px-4 pb-16 w-full" style="max-width:880px">
 
@@ -329,6 +335,9 @@
     </footer>
   </div>
 
+  <!-- Magenta via CDN — must be in body so it loads after DOM, before inline script -->
+  <script src="https://cdn.jsdelivr.net/npm/@magenta/music@1.23.1/es5/core.js"></script>
+
   <script>
     // ─── Constants ───────────────────────────────────────────────────────────
     const CHECKPOINT = 'https://storage.googleapis.com/magentadata/js/checkpoints/melody_rnn/basic_rnn';
@@ -339,7 +348,14 @@
       '#ef4444','#f87171','#f97316','#fb923c','#eab308',
       '#22c55e','#4ade80','#06b6d4','#22d3ee','#3b82f6','#818cf8','#a855f7'
     ];
-    const MOOD_TEMP = { jazz:1.2, classical:0.8, 'lo-fi':1.0, pop:0.9, random:1.5 };
+    const MOOD_TEMP   = { jazz: 1.2, classical: 0.8, 'lo-fi': 1.0, pop: 0.95, random: 1.3 };
+    const MOOD_SCALES = {
+      jazz:      [60, 62, 63, 65, 67, 69, 70],
+      classical: [60, 62, 64, 65, 67, 69, 71],
+      'lo-fi':   [60, 63, 65, 67, 70],
+      pop:       [60, 62, 64, 67, 69],
+      random:    [60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71],
+    };
     const NOTE_MAP  = { C:0, D:2, E:4, F:5, G:7, A:9, B:11 };
     const STUB = {
       notes: [
@@ -355,6 +371,7 @@
     let model = null, noteSeq = null;
     let isPlaying = false, activeNote = null;
     let activePart = null, activeSynth = null;
+    let activeEffects = [];
     let completeTimer = null, rafId = null;
 
     // ─── DOM refs ─────────────────────────────────────────────────────────────
@@ -402,16 +419,33 @@
       loadingBanner.classList.add('flex');
       generateBtn.disabled = true;
 
+      // Wait up to 10s for window.core (CDN may still be downloading)
+      let waited = 0;
+      while (!window.core && waited < 10000) {
+        await new Promise(r => setTimeout(r, 200));
+        waited += 200;
+      }
+
       if (!window.core) {
-        console.warn('Magenta CDN not ready — stub mode');
+        console.error('[MelodyAI] window.core undefined after 10s — CDN failed to load.');
         finishLoad(null); return;
       }
+
+      console.log('[MelodyAI] window.core loaded:', Object.keys(window.core));
+
+      if (!window.core.MelodyRNN) {
+        console.error('[MelodyAI] window.core.MelodyRNN not found. Keys:', Object.keys(window.core));
+        finishLoad(null); return;
+      }
+
       try {
+        console.log('[MelodyAI] Loading MelodyRNN checkpoint...');
         const m = new window.core.MelodyRNN(CHECKPOINT);
         await m.initialize();
+        console.log('[MelodyAI] MelodyRNN loaded and ready.');
         finishLoad(m);
       } catch (e) {
-        console.error('Model init failed:', e);
+        console.error('[MelodyAI] MelodyRNN failed to initialize:', e);
         finishLoad(null);
       }
     }
@@ -423,22 +457,70 @@
       generateBtn.disabled = false;
     }
 
+    function showError(msg) {
+      $('error-text').textContent = msg;
+      const b = $('error-banner');
+      b.classList.remove('hidden');
+      b.classList.add('flex');
+    }
+    function clearError() {
+      const b = $('error-banner');
+      b.classList.add('hidden');
+      b.classList.remove('flex');
+    }
+
+    // ─── Algorithmic fallback ─────────────────────────────────────────────────
+    function generateAlgorithmic(mood) {
+      const scale = MOOD_SCALES[mood] ?? MOOD_SCALES.pop;
+      const durations = [0.25, 0.5, 0.5, 0.5, 0.75, 1.0];
+      const noteCount = 10 + Math.floor(Math.random() * 8);
+      const notes = [];
+      let time = 0;
+      let idx = Math.floor(Math.random() * scale.length);
+      for (let i = 0; i < noteCount; i++) {
+        if (Math.random() < 0.7) {
+          idx = Math.max(0, Math.min(scale.length - 1, idx + Math.floor(Math.random() * 5) - 2));
+        } else {
+          idx = Math.floor(Math.random() * scale.length);
+        }
+        const dur = durations[Math.floor(Math.random() * durations.length)];
+        notes.push({ pitch: scale[idx], startTime: time, endTime: time + dur, velocity: 70 + Math.floor(Math.random() * 30) });
+        time += dur;
+      }
+      console.log('[MelodyAI] Algorithmic melody generated.', { notes: notes.length });
+      return { notes, totalTime: time };
+    }
+
     // ─── Generate ─────────────────────────────────────────────────────────────
     async function generate() {
       setGenerating(true);
+      clearError();
 
-      const mood      = moodSel.value;
-      const seedNotes = parseNotes(seedInput.value);
-      const temp      = MOOD_TEMP[mood] ?? 1.0;
+      const mood   = moodSel.value;
+      const parsed = parseNotes(seedInput.value);
+      const base   = MOOD_TEMP[mood] ?? 1.0;
+      const jitter = Math.random() * 0.3 - 0.15;
+      const temp   = Math.min(1.5, Math.max(0.5, base + jitter));
+      const steps  = 32 + Math.floor(Math.random() * 16); // 32–48
+
+      // Seed: user-provided or mood-based random
+      const seeds = parsed.length
+        ? parsed
+        : (() => {
+            const scale = MOOD_SCALES[mood] ?? MOOD_SCALES.pop;
+            const count = 2 + Math.floor(Math.random() * 2);
+            return Array.from({ length: count }, () => scale[Math.floor(Math.random() * scale.length)]);
+          })();
+
+      console.log({ mood, temperature: +temp.toFixed(3), seedNotes: seeds, steps });
 
       if (!model || !window.core) {
-        await new Promise(r => setTimeout(r, 500));
-        noteSeq = STUB;
+        console.warn('[MelodyAI] No model — generating algorithmically.');
+        noteSeq = generateAlgorithmic(mood);
         setGenerating(false);
         showRoll(); return;
       }
 
-      const seeds = seedNotes.length ? seedNotes : [60];
       const seedObjs = seeds.map((p, i) => ({
         pitch: p, startTime: i * 0.5, endTime: (i + 1) * 0.5, velocity: 80,
       }));
@@ -450,11 +532,21 @@
       };
 
       try {
-        const q = window.core.sequences.quantizeNoteSequence(seedSeq, 4);
-        noteSeq = await model.continueSequence(q, 32, temp);
+        const q            = window.core.sequences.quantizeNoteSequence(seedSeq, 4);
+        const continuation = await model.continueSequence(q, steps, temp);
+        const seedOffset   = seedObjs[seedObjs.length - 1].endTime;
+        const shifted      = (continuation.notes ?? []).map(n => ({
+          ...n, startTime: n.startTime + seedOffset, endTime: n.endTime + seedOffset,
+        }));
+        noteSeq = {
+          notes:    [...seedObjs, ...shifted],
+          totalTime: (continuation.totalTime ?? 0) + seedOffset,
+          tempos:   [{ time: 0, qpm: 120 }],
+          quantizationInfo: { stepsPerQuarter: 4 },
+        };
       } catch (e) {
-        console.error('Generation failed:', e);
-        noteSeq = STUB;
+        console.error('[MelodyAI] Magenta generation failed, using algorithmic fallback:', e);
+        noteSeq = generateAlgorithmic(mood);
       }
 
       setGenerating(false);
@@ -477,6 +569,61 @@
       drawCanvas();
     }
 
+    // ─── Per-mood synth chain builder ─────────────────────────────────────────
+    async function buildSynthChain(mood) {
+      const effective = mood === 'random'
+        ? ['jazz', 'classical', 'lo-fi', 'pop'][Math.floor(Math.random() * 4)]
+        : mood;
+
+      if (effective === 'jazz') {
+        const reverb = new Tone.Reverb({ decay: 2, wet: 0.3 });
+        await reverb.ready;
+        const synth = new Tone.PolySynth(Tone.Synth, {
+          oscillator: { type: 'sine' },
+          envelope: { attack: 0.02, decay: 0.1, sustain: 0.5, release: 0.8 },
+        });
+        synth.connect(reverb); reverb.toDestination();
+        return { synth, effects: [reverb] };
+      }
+      if (effective === 'classical') {
+        const reverb = new Tone.Reverb({ decay: 4, wet: 0.4 });
+        await reverb.ready;
+        const synth = new Tone.PolySynth(Tone.Synth, {
+          oscillator: { type: 'triangle' },
+          envelope: { attack: 0.05, decay: 0.2, sustain: 0.6, release: 1.2 },
+        });
+        synth.connect(reverb); reverb.toDestination();
+        return { synth, effects: [reverb] };
+      }
+      if (effective === 'lo-fi') {
+        const crusher = new Tone.BitCrusher(4);
+        const filter  = new Tone.Filter(800, 'lowpass');
+        const synth   = new Tone.PolySynth(Tone.Synth, {
+          oscillator: { type: 'sawtooth' },
+          envelope: { attack: 0.05, decay: 0.15, sustain: 0.4, release: 0.6 },
+        });
+        synth.connect(crusher); crusher.connect(filter); filter.toDestination();
+        return { synth, effects: [crusher, filter] };
+      }
+      if (effective === 'pop') {
+        const reverb = new Tone.Reverb({ decay: 0.5, wet: 0.2 });
+        const chorus = new Tone.Chorus(4, 2.5, 0.5).start();
+        await reverb.ready;
+        const synth = new Tone.PolySynth(Tone.Synth, {
+          oscillator: { type: 'square' },
+          envelope: { attack: 0.01, decay: 0.1, sustain: 0.4, release: 0.5 },
+        });
+        synth.connect(chorus); chorus.connect(reverb); reverb.toDestination();
+        return { synth, effects: [chorus, reverb] };
+      }
+      // fallback
+      const synth = new Tone.PolySynth(Tone.Synth, {
+        oscillator: { type: 'triangle' },
+        envelope: { attack: 0.02, decay: 0.1, sustain: 0.5, release: 0.8 },
+      }).toDestination();
+      return { synth, effects: [] };
+    }
+
     // ─── Playback ─────────────────────────────────────────────────────────────
     async function play() {
       if (!noteSeq) return;
@@ -488,10 +635,9 @@
       const notes     = noteSeq.notes ?? [];
       if (!notes.length) return;
 
-      activeSynth = new Tone.PolySynth(Tone.Synth, {
-        oscillator: { type: 'triangle' },
-        envelope: { attack: 0.02, decay: 0.1, sustain: 0.5, release: 0.8 },
-      }).toDestination();
+      const { synth, effects } = await buildSynthChain(moodSel.value);
+      activeSynth   = synth;
+      activeEffects = effects;
 
       const events = notes.map(n => ({
         time:     n.startTime * timeScale,
@@ -542,6 +688,8 @@
       cancelAnimationFrame(rafId);
       if (activePart)  { activePart.dispose();  activePart  = null; }
       if (activeSynth) { activeSynth.dispose(); activeSynth = null; }
+      activeEffects.forEach(e => e.dispose());
+      activeEffects = [];
     }
 
     function stop() {

@@ -1,128 +1,266 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { initModel, generateMelody } from './components/MelodyGenerator';
 import { playMelody, stopPlayback } from './components/Playback';
+import { generateSynthPatch } from './components/SoundDesigner';
+import { interpretTheme } from './components/ThemeInterpreter';
 import Controls from './components/Controls';
 import PianoRoll from './components/PianoRoll';
 import styles from './styles/App.module.css';
 
-const NOTE_MAP = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
-
-function parseNoteInput(text) {
-  if (!text.trim()) return [];
-  return text
-    .trim()
-    .toUpperCase()
-    .split(/\s+/)
-    .filter(Boolean)
-    .map(token => {
-      const match = token.match(/^([A-G])(\d)$/);
-      if (!match) return null;
-      const [, noteName, octave] = match;
-      return (parseInt(octave) + 1) * 12 + NOTE_MAP[noteName];
-    })
-    .filter(n => n !== null)
-    .slice(0, 3);
-}
-
 export default function App() {
-  const [model, setModel] = useState(null);
+  const [model,          setModel]          = useState(null);
   const [isModelLoading, setIsModelLoading] = useState(true);
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [noteSequence, setNoteSequence] = useState(null);
-  const [mood, setMood] = useState('pop');
-  const [seedNotesText, setSeedNotesText] = useState('');
-  const [tempo, setTempo] = useState(120);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [activeNote, setActiveNote] = useState(null);
+  const [modelReady,     setModelReady]     = useState(false);
+  const [isGenerating,   setIsGenerating]   = useState(false);
+  const [isPlaying,      setIsPlaying]      = useState(false);
 
+  // Theme / mood state
+  const [theme,          setThemeRaw]       = useState('');
+  const [themeProfile,   setThemeProfile]   = useState(null);
+  const [moodOverride,   setMoodOverride]   = useState('auto');
+  const [tempo,          setTempo]          = useState(110);
+
+  // Generated music state
+  const [lead,           setLead]           = useState(null);
+  const [counter,        setCounter]        = useState(null);
+  const [bass,           setBass]           = useState(null);
+  const [chords,         setChords]         = useState(null);
+  const [drums,          setDrums]          = useState(null);
+  const [activeNote,     setActiveNote]     = useState(null);
+  const [synthPatch,     setSynthPatch]     = useState(null);
+
+  const debounceRef = useRef(null);
+
+  // ── Load Magenta model ───────────────────────────────────────────────────
   useEffect(() => {
     initModel()
       .then(m => {
         setModel(m);
         setIsModelLoading(false);
+        if (m !== null) {
+          setModelReady(true);
+          setTimeout(() => setModelReady(false), 3000);
+        }
       })
       .catch(() => setIsModelLoading(false));
   }, []);
 
+  // ── Theme change — debounce interpretation ───────────────────────────────
+  function handleThemeChange(newTheme) {
+    setThemeRaw(newTheme);
+    clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      if (newTheme.trim().length > 2) {
+        const profile = interpretTheme(newTheme);
+        setThemeProfile(profile);
+        if (moodOverride === 'auto') {
+          setTempo(profile.bpm);
+        }
+      } else {
+        setThemeProfile(null);
+      }
+    }, 300);
+  }
+
+  // ── Generate ─────────────────────────────────────────────────────────────
   async function handleGenerate() {
     setIsGenerating(true);
-    const seedNotes = parseNoteInput(seedNotesText);
     try {
-      const seq = await generateMelody({ model, seedNotes, mood, steps: 32 });
-      setNoteSequence(seq);
+      const activeMood      = moodOverride !== 'auto' ? moodOverride : (themeProfile?.mood ?? 'happy');
+      const activeDrumStyle = themeProfile?.drumStyle ?? 'four_on_floor';
+      const activeLayers    = themeProfile?.layers    ?? 'standard';
+
+      const patch = generateSynthPatch(activeMood);
+      setSynthPatch(patch);
+
+      const result = await generateMelody({
+        mood:      activeMood,
+        model,
+        drumStyle: activeDrumStyle,
+        layers:    activeLayers,
+      });
+
+      setLead(result.lead);
+      setCounter(result.counter);
+      setBass(result.bass);
+      setChords(result.chords);
+      setDrums(result.drums);
+    } catch (err) {
+      console.error('handleGenerate error:', err);
     } finally {
       setIsGenerating(false);
     }
   }
 
-  function handlePlay() {
-    if (!noteSequence) return;
+  // ── Play ─────────────────────────────────────────────────────────────────
+  async function handlePlay() {
     setIsPlaying(true);
     setActiveNote(null);
-    playMelody({
-      noteSequence,
+    await playMelody({
+      lead,
+      counter,
+      bass,
+      chords,
+      drums,
       tempo,
-      onNoteOn: pitch => setActiveNote(pitch),
-      onNoteOff: () => setActiveNote(null),
-      onComplete: () => setIsPlaying(false),
+      synthPatch,
+      onNoteOn:   pitch => setActiveNote(pitch),
+      onNoteOff:  ()    => setActiveNote(null),
+      onComplete: ()    => setIsPlaying(false),
     });
   }
 
+  // ── Stop ─────────────────────────────────────────────────────────────────
   function handleStop() {
     stopPlayback();
     setIsPlaying(false);
     setActiveNote(null);
   }
 
+  const hasMelody = lead !== null;
+
   return (
     <div className={styles.app}>
+
+      {/* ── Header ─────────────────────────────────────────────────────────── */}
       <header className={styles.header}>
         <div className={styles.badge}>Generative AI · MelodyRNN</div>
         <h1 className={styles.title}>🎵 AI Melody Generator</h1>
         <p className={styles.subtitle}>
-          Compose unique melodies with neural networks, right in your browser
+          Describe a theme and let AI compose music for your scene
         </p>
       </header>
 
+      {/* ── Theme card ─────────────────────────────────────────────────────── */}
+      {themeProfile && (
+        <div
+          className={styles.themeCard}
+          style={{ borderLeftColor: themeProfile.accentColor }}
+        >
+          <div className={styles.themeCardName}>"{themeProfile.rawTheme}"</div>
+          <div className={styles.themeCardDesc}>{themeProfile.description}</div>
+          <div className={styles.themeCardBadges}>
+            <span className={styles.themeBadge}>{themeProfile.mood}</span>
+            <span className={styles.themeBadge}>{themeProfile.drumStyle.replace(/_/g, ' ')}</span>
+            <span className={styles.themeBadge}>{themeProfile.layers}</span>
+          </div>
+        </div>
+      )}
+
+      {/* ── Model status banners ───────────────────────────────────────────── */}
       {isModelLoading && (
         <div className={styles.loadingBanner}>
           <div className={styles.loadingDots}>
-            <span />
-            <span />
-            <span />
+            <span /><span /><span />
           </div>
           <span>Loading AI model...</span>
         </div>
       )}
 
+      {!isModelLoading && modelReady && (
+        <div className={styles.readyBanner}>
+          <span>✅</span>
+          <span>Magenta AI ready</span>
+        </div>
+      )}
+
+      {!isModelLoading && !modelReady && model === null && (
+        <div className={styles.algorithmicBanner}>
+          <span>⚡</span>
+          <div className={styles.algorithmicText}>
+            <span>Running in algorithmic mode</span>
+            <span className={styles.algorithmicSub}>
+              Music is generated using music theory rules — fully AI-driven, no model required.
+            </span>
+          </div>
+        </div>
+      )}
+
       <main className={styles.main}>
+
+        {/* ── Controls ──────────────────────────────────────────────────────── */}
         <Controls
-          mood={mood}
-          setMood={setMood}
-          seedNotesText={seedNotesText}
-          setSeedNotesText={setSeedNotesText}
+          theme={theme}
+          setTheme={handleThemeChange}
+          themeProfile={themeProfile}
+          moodOverride={moodOverride}
+          setMoodOverride={setMoodOverride}
           tempo={tempo}
           setTempo={setTempo}
           onGenerate={handleGenerate}
           onPlay={handlePlay}
           onStop={handleStop}
-          isLoading={isModelLoading || isGenerating}
+          isLoading={isModelLoading}
+          isGenerating={isGenerating}
           isPlaying={isPlaying}
-          hasMelody={!!noteSequence}
+          hasMelody={hasMelody}
         />
 
+        {/* ── Sound design card ─────────────────────────────────────────────── */}
+        {synthPatch && (
+          <div className={styles.soundCard}>
+            <div className={styles.soundCardHeader}>
+              <span className={styles.soundCardIcon}>🎛</span>
+              <span className={styles.soundCardTitle}>Sound Design</span>
+              <span className={styles.soundCardCharacter}>{synthPatch.character}</span>
+            </div>
+            <div className={styles.soundCardGrid}>
+              <div className={styles.soundCardItem}>
+                <span className={styles.soundCardLabel}>Waveform</span>
+                <span className={styles.soundCardValue}>{synthPatch.oscillator.waveform}</span>
+              </div>
+              <div className={styles.soundCardItem}>
+                <span className={styles.soundCardLabel}>Filter</span>
+                <span className={styles.soundCardValue}>{synthPatch.filter.type}</span>
+              </div>
+              <div className={styles.soundCardItem}>
+                <span className={styles.soundCardLabel}>Reverb</span>
+                <span className={styles.soundCardValue}>{Math.round(synthPatch.effects.reverb * 100)}%</span>
+              </div>
+            </div>
+            <div className={styles.macroRow}>
+              <div className={styles.macroItem}>
+                <span className={styles.macroLabel}>Brightness</span>
+                <div className={styles.macroTrack}>
+                  <div className={styles.macroFill} style={{ width: `${Math.round(synthPatch.macros.brightness * 100)}%` }} />
+                </div>
+                <span className={styles.macroVal}>{Math.round(synthPatch.macros.brightness * 100)}%</span>
+              </div>
+              <div className={styles.macroItem}>
+                <span className={styles.macroLabel}>Movement</span>
+                <div className={styles.macroTrack}>
+                  <div className={styles.macroFill} style={{ width: `${Math.round(Math.min(synthPatch.macros.movement, 1) * 100)}%` }} />
+                </div>
+                <span className={styles.macroVal}>{Math.round(Math.min(synthPatch.macros.movement, 1) * 100)}%</span>
+              </div>
+              <div className={styles.macroItem}>
+                <span className={styles.macroLabel}>Space</span>
+                <div className={styles.macroTrack}>
+                  <div className={styles.macroFill} style={{ width: `${Math.round(synthPatch.macros.space * 100)}%` }} />
+                </div>
+                <span className={styles.macroVal}>{Math.round(synthPatch.macros.space * 100)}%</span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Piano roll ────────────────────────────────────────────────────── */}
         <PianoRoll
-          noteSequence={noteSequence}
+          lead={lead}
+          counter={counter}
+          bass={bass}
+          chords={chords}
+          drums={drums}
           activeNote={activeNote}
-          width={800}
-          height={300}
           isPlaying={isPlaying}
-          tempo={tempo}
+          width={900}
+          height={380}
         />
+
       </main>
 
       <footer className={styles.footer}>
-        Built at HackAtlanta 2026
+        Built with Magenta.js + Tone.js
       </footer>
     </div>
   );
