@@ -85,7 +85,7 @@ export default function PianoRoll({ lead, counter, bass, chords, drums, activeNo
       const pixelsPerSecond = ROLL_W / totalTime;
 
       // ── Full background ─────────────────────────────────────────────────────
-      ctx.fillStyle = '#0d0c1d';
+      ctx.fillStyle = '#f8f3ff';
       ctx.fillRect(0, 0, W, H);
 
       // ── Piano keys (left 24px, melody area only) ───────────────────────────
@@ -94,18 +94,18 @@ export default function PianoRoll({ lead, counter, bass, chords, drums, activeNo
         const isBlack = BLACK_PITCHES.has(pc);
         const y       = MELODY_H - (p - MIN_PITCH + 1) * rowH;
 
-        ctx.fillStyle = isBlack ? '#0f0e2a' : '#1e1b4b';
+        ctx.fillStyle = isBlack ? '#cdb7ff' : '#f3eaff';
         ctx.fillRect(0, y, PIANO_W, rowH);
 
         if (pc === 0) {
           const octave = Math.floor(p / 12) - 1;
-          ctx.fillStyle    = 'rgba(255,255,255,0.45)';
+          ctx.fillStyle    = 'rgba(83, 54, 122, 0.85)';
           ctx.font         = '9px Inter, sans-serif';
           ctx.textBaseline = 'middle';
           ctx.fillText(`C${octave}`, 2, y + rowH / 2);
         }
 
-        ctx.fillStyle = 'rgba(255,255,255,0.025)';
+        ctx.fillStyle = 'rgba(113, 76, 156, 0.15)';
         ctx.fillRect(0, y + rowH - 1, PIANO_W, 1);
       }
 
@@ -115,15 +115,15 @@ export default function PianoRoll({ lead, counter, bass, chords, drums, activeNo
         const isBlack = BLACK_PITCHES.has(pc);
         const y       = MELODY_H - (p - MIN_PITCH + 1) * rowH;
 
-        ctx.fillStyle = isBlack ? '#12112a' : '#1a1833';
+        ctx.fillStyle = isBlack ? '#eadffb' : '#f6f1ff';
         ctx.fillRect(PIANO_W, y, ROLL_W, rowH);
 
         if (pc === 0) {
-          ctx.fillStyle = 'rgba(124,58,237,0.06)';
+          ctx.fillStyle = 'rgba(168, 85, 247, 0.12)';
           ctx.fillRect(PIANO_W, y, ROLL_W, rowH);
         }
 
-        ctx.fillStyle = 'rgba(255,255,255,0.02)';
+        ctx.fillStyle = 'rgba(114, 94, 151, 0.1)';
         ctx.fillRect(PIANO_W, y + rowH - 1, ROLL_W, 1);
       }
 
@@ -136,8 +136,8 @@ export default function PianoRoll({ lead, counter, bass, chords, drums, activeNo
           const noteW = Math.max(3, (note.endTime - note.startTime) * pixelsPerSecond - 1);
           const y     = MELODY_H - (note.pitch - MIN_PITCH + 1) * rowH + 1;
           const noteH = rowH - 2;
-          ctx.fillStyle   = '#312e81';
-          ctx.shadowColor = '#818cf8';
+          ctx.fillStyle   = '#c4b5fd';
+          ctx.shadowColor = '#d8b4fe';
           ctx.shadowBlur  = 3;
           ctx.beginPath();
           drawRoundRect(ctx, x, y, noteW, noteH, 2);
@@ -156,8 +156,8 @@ export default function PianoRoll({ lead, counter, bass, chords, drums, activeNo
           const noteW = Math.max(3, (note.endTime - note.startTime) * pixelsPerSecond - 1);
           const y     = MELODY_H - (note.pitch - MIN_PITCH + 1) * rowH + 1;
           const noteH = rowH - 2;
-          ctx.fillStyle   = '#1e40af';
-          ctx.shadowColor = '#3b82f6';
+          ctx.fillStyle   = '#a5b4fc';
+          ctx.shadowColor = '#c7d2fe';
           ctx.shadowBlur  = 4;
           ctx.beginPath();
           drawRoundRect(ctx, x, y, noteW, noteH, 2);
@@ -176,8 +176,8 @@ export default function PianoRoll({ lead, counter, bass, chords, drums, activeNo
           const noteW = Math.max(3, (note.endTime - note.startTime) * pixelsPerSecond - 1);
           const y     = MELODY_H - (note.pitch - MIN_PITCH + 1) * rowH + 1;
           const noteH = rowH - 2;
-          ctx.fillStyle   = '#0f766e';
-          ctx.shadowColor = '#06b6d4';
+          ctx.fillStyle   = '#d8b4fe';
+          ctx.shadowColor = '#f0abfc';
           ctx.shadowBlur  = 4;
           ctx.beginPath();
           drawRoundRect(ctx, x, y, noteW, noteH, 2);
@@ -217,15 +217,15 @@ export default function PianoRoll({ lead, counter, bass, chords, drums, activeNo
       }
 
       // ── Drum lane separator ────────────────────────────────────────────────
-      ctx.fillStyle = '#1e1b4b';
+      ctx.fillStyle = '#d8cafd';
       ctx.fillRect(0, MELODY_H, W, 1);
 
       // ── Drum lane background ───────────────────────────────────────────────
-      ctx.fillStyle = '#09091a';
+      ctx.fillStyle = '#f3ecff';
       ctx.fillRect(0, MELODY_H + 1, W, DRUM_H - 1);
 
       // "DRUMS" label on left edge
-      ctx.fillStyle    = '#334155';
+      ctx.fillStyle    = '#6f5b9a';
       ctx.font         = '8px Inter, sans-serif';
       ctx.textBaseline = 'middle';
       ctx.fillText('DRUMS', 3, MELODY_H + DRUM_H / 2);
@@ -298,7 +298,7 @@ export default function PianoRoll({ lead, counter, bass, chords, drums, activeNo
       const legendY = 6;
 
       ctx.save();
-      ctx.fillStyle = 'rgba(10,10,20,0.78)';
+      ctx.fillStyle = 'rgba(255,255,255,0.9)';
       ctx.beginPath();
       drawRoundRect(ctx, legendX - 4, legendY - 4, padW + 8, padH, 4);
       ctx.fill();
@@ -311,7 +311,7 @@ export default function PianoRoll({ lead, counter, bass, chords, drums, activeNo
         const ly = legendY + 4;
         ctx.fillStyle = item.color;
         ctx.fillRect(lx, ly, boxSize, boxSize);
-        ctx.fillStyle = 'rgba(255,255,255,0.7)';
+        ctx.fillStyle = '#3a2958';
         ctx.fillText(item.label, lx + boxSize + 3, ly + boxSize / 2);
       });
 
@@ -320,7 +320,7 @@ export default function PianoRoll({ lead, counter, bass, chords, drums, activeNo
         const ly = legendY + 4 + rowGap;
         ctx.fillStyle = item.color;
         ctx.fillRect(lx, ly, boxSize, boxSize);
-        ctx.fillStyle = 'rgba(255,255,255,0.55)';
+        ctx.fillStyle = '#4c3b6e';
         ctx.fillText(item.label, lx + boxSize + 3, ly + boxSize / 2);
       });
 

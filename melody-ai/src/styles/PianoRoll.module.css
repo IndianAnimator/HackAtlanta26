@@ -8,25 +8,25 @@
   display: block;
   border-radius: 16px;
   max-width: 100%;
-  background: #0d0c1d;
-  border: 1px solid #1e1b4b;
+  background: #f8f3ff;
+  border: 1px solid rgba(188, 157, 255, 0.6);
   overflow: hidden;
   box-shadow:
-    0 0 40px rgba(124, 58, 237, 0.15),
-    0 28px 70px rgba(0, 0, 0, 0.55);
+    0 0 40px rgba(186, 148, 255, 0.3),
+    0 28px 70px rgba(154, 122, 210, 0.35);
 }
 
 .placeholder {
   border-radius: 16px;
-  background: #0d0c1d;
-  border: 1px solid #1e1b4b;
+  background: #f7f0ff;
+  border: 1px solid rgba(188, 157, 255, 0.5);
   display: flex;
   align-items: center;
   justify-content: center;
   max-width: 100%;
   box-shadow:
-    0 0 40px rgba(124, 58, 237, 0.08),
-    0 28px 70px rgba(0, 0, 0, 0.45);
+    0 0 40px rgba(186, 148, 255, 0.2),
+    0 28px 70px rgba(152, 118, 210, 0.35);
 }
 
 .placeholderInner {
@@ -34,17 +34,17 @@
   flex-direction: column;
   align-items: center;
   gap: 0.75rem;
-  opacity: 0.35;
+  opacity: 0.55;
   user-select: none;
 }
 
 .placeholderIcon {
   font-size: 2.75rem;
-  filter: grayscale(1);
+  color: #c084fc;
 }
 
 .placeholder p {
-  color: #475569;
+  color: #6a4f8e;
   font-size: 1rem;
   font-family: 'Inter', sans-serif;
   text-align: center;
