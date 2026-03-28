@@ -7,7 +7,10 @@ export default function Controls({
   moodOverride, setMoodOverride,
   tempo, setTempo,
   onGenerate, onPlay, onStop,
-  isLoading, isGenerating, isPlaying, hasMelody
+  onDownloadMidi, onDownloadDrumMidi,
+  isLoading, isGenerating, isPlaying,
+  hasMelody, hasDrumTrack,
+  isExportingMidi, isExportingDrumMidi,
 }) {
 
   function handleThemeChange(e) {
@@ -42,21 +45,19 @@ export default function Controls({
 
       {/* MOOD OVERRIDE */}
       <div className={styles.controlGroup}>
-        <label className={styles.label}>Mood override</label>
+        <label className={styles.label}>Mood</label>
         <select
           className={styles.select}
           value={moodOverride}
           onChange={e => {
-            setMoodOverride(e.target.value)
-            if (e.target.value !== 'auto') {
-              setTempo(DEFAULT_TEMPOS[e.target.value])
-            } else if (themeProfile) {
-              setTempo(themeProfile.bpm)
+            const value = e.target.value
+            setMoodOverride(value)
+            if (DEFAULT_TEMPOS[value]) {
+              setTempo(DEFAULT_TEMPOS[value])
             }
           }}
           disabled={isLoading || isGenerating}
         >
-          <option value="auto">Auto-detect from theme</option>
           <option value="happy">Happy</option>
           <option value="sad">Sad</option>
           <option value="jazz">Jazz</option>
@@ -98,6 +99,22 @@ export default function Controls({
           disabled={!hasMelody || isGenerating}
         >
           {isPlaying ? '⏹ Stop' : '▶ Play'}
+        </button>
+
+        <button
+          className={styles.downloadButton}
+          onClick={onDownloadMidi}
+          disabled={!hasMelody || isGenerating || isExportingMidi}
+        >
+          {isExportingMidi ? 'Preparing MIDI...' : '⬇️ Download MIDI'}
+        </button>
+
+        <button
+          className={styles.downloadButton}
+          onClick={onDownloadDrumMidi}
+          disabled={!hasDrumTrack || isGenerating || isExportingDrumMidi}
+        >
+          {isExportingDrumMidi ? 'Preparing Drums...' : '🥁 Drum MIDI'}
         </button>
       </div>
 
