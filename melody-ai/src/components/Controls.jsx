@@ -1,12 +1,10 @@
 import React from 'react'
-import { DEFAULT_TEMPOS } from './MelodyGenerator'
 import styles from '../styles/Controls.module.css'
 
 export default function Controls({
   theme, setTheme, themeProfile,
   moodOverride, setMoodOverride,
-  tempo, setTempo,
-  onGenerate, onPlay, onStop,
+  onGenerate,
   onDownloadMidi, onDownloadDrumMidi,
   isLoading, isGenerating, isPlaying,
   hasMelody, hasDrumTrack,
@@ -52,9 +50,6 @@ export default function Controls({
           onChange={e => {
             const value = e.target.value
             setMoodOverride(value)
-            if (DEFAULT_TEMPOS[value]) {
-              setTempo(DEFAULT_TEMPOS[value])
-            }
           }}
           disabled={isLoading || isGenerating}
         >
@@ -69,20 +64,6 @@ export default function Controls({
         </select>
       </div>
 
-      {/* TEMPO */}
-      <div className={styles.controlGroup}>
-        <label className={styles.label}>Tempo</label>
-        <input
-          type="range"
-          min={60} max={180}
-          value={tempo}
-          onChange={e => setTempo(Number(e.target.value))}
-          className={styles.slider}
-          disabled={isLoading || isGenerating || isPlaying}
-        />
-        <span className={styles.bpmLabel}>{tempo} BPM</span>
-      </div>
-
       {/* BUTTONS */}
       <div className={styles.buttonGroup}>
         <button
@@ -91,14 +72,6 @@ export default function Controls({
           disabled={isLoading || isGenerating || isPlaying}
         >
           {isGenerating ? 'Generating...' : '✨ Generate'}
-        </button>
-
-        <button
-          className={styles.playButton}
-          onClick={isPlaying ? onStop : onPlay}
-          disabled={!hasMelody || isGenerating}
-        >
-          {isPlaying ? '⏹ Stop' : '▶ Play'}
         </button>
 
         <button

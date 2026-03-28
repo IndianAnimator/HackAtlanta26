@@ -7,6 +7,14 @@ import Controls from './components/Controls';
 import PianoRoll from './components/PianoRoll';
 import styles from './styles/App.module.css';
 
+const SAMPLE_THEMES = [
+  'cosmic sunrise over tokyo rooftops',
+  'retro arcade boss battle',
+  'rainy neon coffee shop',
+  'grand fantasy airship departure',
+  'slow-motion beach proposal',
+];
+
 export default function App() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -14,7 +22,7 @@ export default function App() {
   const [theme, setThemeRaw] = useState('');
   const [themeProfile, setThemeProfile] = useState(null);
   const [moodOverride, setMoodOverride] = useState('happy');
-  const [tempo, setTempo] = useState(110);
+  const tempo = 110;
 
   const [lead, setLead] = useState(null);
   const [counter, setCounter] = useState(null);
@@ -197,6 +205,11 @@ export default function App() {
 
   const hasMelody = Boolean(lead && strudelScore?.arrangement);
   const hasDrumTrack = Boolean(drums?.notes?.length);
+  const quickTips = [
+    'Try evocative adjectives (e.g. “wistful desert chase”).',
+    'Switch moods to instantly re-orchestrate the idea.',
+    'Download drums separately to mix with your own layers.',
+  ];
 
   const sourceStyles = (() => {
     if (generationSource === 'strudel') {
@@ -226,6 +239,13 @@ export default function App() {
     return null;
   })();
 
+  function handleSurpriseTheme() {
+    const randomTheme = SAMPLE_THEMES[Math.floor(Math.random() * SAMPLE_THEMES.length)];
+    setThemeRaw(randomTheme);
+    const profile = interpretTheme(randomTheme);
+    setThemeProfile(profile);
+  }
+
   return (
     <div className={styles.app}>
       <header className={styles.header}>
@@ -234,6 +254,12 @@ export default function App() {
         <p className={styles.subtitle}>
           Describe a theme and let AI compose music for your scene
         </p>
+        <div className={styles.heroActions}>
+          <button className={styles.surpriseBtn} onClick={handleSurpriseTheme}>
+            Surprise me
+          </button>
+          <span className={styles.heroHint}>Need inspiration? Tap for a themed prompt.</span>
+        </div>
       </header>
 
       {themeProfile && (
@@ -252,30 +278,51 @@ export default function App() {
       )}
 
       <main className={styles.main}>
-        <Controls
-          theme={theme}
-          setTheme={handleThemeChange}
+        <section className={`${styles.panel} ${styles.controlPanel}`}>
+          <Controls
+            theme={theme}
+            setTheme={handleThemeChange}
           themeProfile={themeProfile}
           moodOverride={moodOverride}
           setMoodOverride={setMoodOverride}
-          tempo={tempo}
-          setTempo={setTempo}
           onGenerate={handleGenerate}
-          onPlay={handlePlay}
-          onStop={handleStop}
-          isLoading={false}
-          isGenerating={isGenerating}
-          isPlaying={isPlaying}
-          hasMelody={hasMelody}
-          hasDrumTrack={hasDrumTrack}
-          onDownloadMidi={handleDownloadMidi}
-          onDownloadDrumMidi={handleDownloadDrumMidi}
-          isExportingMidi={isExportingMidi}
-          isExportingDrumMidi={isExportingDrumMidi}
-        />
+            isLoading={false}
+            isGenerating={isGenerating}
+            isPlaying={isPlaying}
+            hasMelody={hasMelody}
+            hasDrumTrack={hasDrumTrack}
+            onDownloadMidi={handleDownloadMidi}
+            onDownloadDrumMidi={handleDownloadDrumMidi}
+            isExportingMidi={isExportingMidi}
+            isExportingDrumMidi={isExportingDrumMidi}
+          />
+        </section>
+
+        <section className={styles.statusRow}>
+          <div className={styles.statusCard}>
+            <span className={styles.statusLabel}>Current Mood</span>
+            <span className={styles.statusValue}>{(themeProfile?.mood || moodOverride).replace(/_/g, ' ')}</span>
+          </div>
+          <div className={styles.statusCard}>
+            <span className={styles.statusLabel}>Drums</span>
+            <span className={styles.statusValue}>{(themeProfile?.drumStyle || 'four_on_floor').replace(/_/g, ' ')}</span>
+          </div>
+          {sourceStyles && (
+            <div
+              className={styles.statusChip}
+              style={{
+                background: sourceStyles.bg,
+                color: sourceStyles.color,
+                border: `1px solid ${sourceStyles.border}`,
+              }}
+            >
+              {sourceStyles.text}
+            </div>
+          )}
+        </section>
 
         {synthPatch && (
-          <div className={styles.soundCard}>
+          <div className={`${styles.soundCard} ${styles.panel}`}>
             <div className={styles.soundCardHeader}>
               <span className={styles.soundCardIcon}>🎛️</span>
               <span className={styles.soundCardTitle}>Sound Design</span>
@@ -321,35 +368,28 @@ export default function App() {
           </div>
         )}
 
-        {sourceStyles && (
-          <div
-            style={{
-              display: 'inline-block',
-              padding: '6px 14px',
-              borderRadius: '20px',
-              fontSize: '13px',
-              fontWeight: 600,
-              marginBottom: '12px',
-              background: sourceStyles.bg,
-              color: sourceStyles.color,
-              border: `1px solid ${sourceStyles.border}`,
-            }}
-          >
-            {sourceStyles.text}
-          </div>
-        )}
+        <section className={`${styles.panel} ${styles.tipsPanel}`}>
+          <h3>✨ Quick Tips</h3>
+          <ul>
+            {quickTips.map((tip) => (
+              <li key={tip}>{tip}</li>
+            ))}
+          </ul>
+        </section>
 
-        <PianoRoll
-          lead={lead}
-          counter={counter}
-          bass={bass}
-          chords={chords}
-          drums={drums}
-          activeNote={activeNote}
-          isPlaying={isPlaying}
-          width={900}
-          height={380}
-        />
+        <section className={`${styles.panel} ${styles.rollPanel}`}>
+          <PianoRoll
+            lead={lead}
+            counter={counter}
+            bass={bass}
+            chords={chords}
+            drums={drums}
+            activeNote={activeNote}
+            isPlaying={isPlaying}
+            width={900}
+            height={380}
+          />
+        </section>
       </main>
 
       <footer className={styles.footer}>
