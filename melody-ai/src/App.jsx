@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from 'react';
-import { initModel, generateMelody } from './components/MelodyGenerator';
+import { useState, useRef } from 'react';
+import { generateMelody } from './components/MelodyGenerator';
 import { playMelody, stopPlayback } from './components/Playback';
 import { generateSynthPatch } from './components/SoundDesigner';
 import { interpretTheme } from './components/ThemeInterpreter';
@@ -8,9 +8,6 @@ import PianoRoll from './components/PianoRoll';
 import styles from './styles/App.module.css';
 
 export default function App() {
-  const [model,          setModel]          = useState(null);
-  const [isModelLoading, setIsModelLoading] = useState(true);
-  const [modelReady,     setModelReady]     = useState(false);
   const [isGenerating,   setIsGenerating]   = useState(false);
   const [isPlaying,      setIsPlaying]      = useState(false);
 
@@ -30,20 +27,6 @@ export default function App() {
   const [synthPatch,     setSynthPatch]     = useState(null);
 
   const debounceRef = useRef(null);
-
-  // ── Load Magenta model ───────────────────────────────────────────────────
-  useEffect(() => {
-    initModel()
-      .then(m => {
-        setModel(m);
-        setIsModelLoading(false);
-        if (m !== null) {
-          setModelReady(true);
-          setTimeout(() => setModelReady(false), 3000);
-        }
-      })
-      .catch(() => setIsModelLoading(false));
-  }, []);
 
   // ── Theme change — debounce interpretation ───────────────────────────────
   function handleThemeChange(newTheme) {
@@ -75,9 +58,9 @@ export default function App() {
 
       const result = await generateMelody({
         mood:      activeMood,
-        model,
         drumStyle: activeDrumStyle,
         layers:    activeLayers,
+        tempo,
       });
 
       setLead(result.lead);
@@ -124,7 +107,7 @@ export default function App() {
 
       {/* ── Header ─────────────────────────────────────────────────────────── */}
       <header className={styles.header}>
-        <div className={styles.badge}>Generative AI · MelodyRNN</div>
+        <div className={styles.badge}>Generative AI · Markov Chain</div>
         <h1 className={styles.title}>🎵 AI Melody Generator</h1>
         <p className={styles.subtitle}>
           Describe a theme and let AI compose music for your scene
@@ -147,35 +130,6 @@ export default function App() {
         </div>
       )}
 
-      {/* ── Model status banners ───────────────────────────────────────────── */}
-      {isModelLoading && (
-        <div className={styles.loadingBanner}>
-          <div className={styles.loadingDots}>
-            <span /><span /><span />
-          </div>
-          <span>Loading AI model...</span>
-        </div>
-      )}
-
-      {!isModelLoading && modelReady && (
-        <div className={styles.readyBanner}>
-          <span>✅</span>
-          <span>Magenta AI ready</span>
-        </div>
-      )}
-
-      {!isModelLoading && !modelReady && model === null && (
-        <div className={styles.algorithmicBanner}>
-          <span>⚡</span>
-          <div className={styles.algorithmicText}>
-            <span>Running in algorithmic mode</span>
-            <span className={styles.algorithmicSub}>
-              Music is generated using music theory rules — fully AI-driven, no model required.
-            </span>
-          </div>
-        </div>
-      )}
-
       <main className={styles.main}>
 
         {/* ── Controls ──────────────────────────────────────────────────────── */}
@@ -190,7 +144,7 @@ export default function App() {
           onGenerate={handleGenerate}
           onPlay={handlePlay}
           onStop={handleStop}
-          isLoading={isModelLoading}
+          isLoading={false}
           isGenerating={isGenerating}
           isPlaying={isPlaying}
           hasMelody={hasMelody}
@@ -260,7 +214,7 @@ export default function App() {
       </main>
 
       <footer className={styles.footer}>
-        Built with Magenta.js + Tone.js
+        Built with Markov Chains + Tone.js
       </footer>
     </div>
   );

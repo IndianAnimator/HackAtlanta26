@@ -21,11 +21,16 @@ export async function playMelody({
 
   Tone.Transport.cancel();
   Tone.Transport.stop();
+
+  // Step 1: set BPM before scheduling anything
   Tone.Transport.bpm.value = tempo ?? 120;
   activeNodes = [];
 
+  // All note times are expressed at 120 BPM reference. Scale to actual tempo.
+  const timeScale = 120 / (tempo ?? 120);
+
   // ── Effects chain ────────────────────────────────────────────────────────
-  const reverbWet = synthPatch?.effects?.reverb     ?? 0.4;
+  const reverbWet = Math.min(0.4, synthPatch?.effects?.reverb ?? 0.4); // cap — high reverb causes wash
   const delayWet  = synthPatch?.effects?.delay      ?? 0.2;
   const distAmt   = synthPatch?.effects?.distortion ?? 0.0;
 
@@ -38,17 +43,22 @@ export async function playMelody({
     synthPatch?.filter?.type   ?? 'lowpass'
   );
 
+  // Master limiter — prevents all layers from clipping the output
+  const limiter = new Tone.Limiter(-3).toDestination();
+  activeNodes.push(limiter);
+
+  // Only create distortion if amount is meaningful
   let dist = null;
-  if (distAmt > 0.05) {
+  if (distAmt > 0.3) {
     dist = new Tone.Distortion(distAmt);
     activeNodes.push(dist);
   }
 
-  // Chain: [dist →] filter → reverb → delay → Destination
+  // Chain: [dist →] filter → reverb → delay → limiter → Destination
   if (dist) dist.connect(filter);
   filter.connect(reverb);
   reverb.connect(delay);
-  delay.toDestination();
+  delay.connect(limiter);
 
   activeNodes.push(filter, reverb, delay);
 
@@ -70,7 +80,7 @@ export async function playMelody({
       release: synthPatch?.envelope?.release ?? 0.4,
     },
   });
-  leadSynth.volume.value = 0;
+  leadSynth.volume.value = -10;
   leadSynth.connect(dist ?? filter);
   activeNodes.push(leadSynth);
 
@@ -90,7 +100,7 @@ export async function playMelody({
     oscillator: { type: 'sine' },
     envelope: { attack: 0.08, decay: 0.2, sustain: 0.5, release: 0.6 },
   });
-  counterSynth.volume.value = -8;
+  counterSynth.volume.value = -16;
   counterSynth.connect(dist ?? filter);
   activeNodes.push(counterSynth);
 
@@ -99,7 +109,7 @@ export async function playMelody({
     oscillator: { type: 'sine' },
     envelope: { attack: 0.01, decay: 0.4, sustain: 0.8, release: 0.3 },
   });
-  bassSynth.volume.value = -4;
+  bassSynth.volume.value = -12;
   bassSynth.connect(dist ?? filter);
   activeNodes.push(bassSynth);
 
@@ -108,7 +118,7 @@ export async function playMelody({
     oscillator: { type: 'triangle' },
     envelope: { attack: 0.15, decay: 0.5, sustain: 0.5, release: 1.2 },
   });
-  chordSynth.volume.value = -14;
+  chordSynth.volume.value = -20;
   chordSynth.connect(dist ?? filter);
   activeNodes.push(chordSynth);
 
@@ -118,7 +128,7 @@ export async function playMelody({
     octaves: 4,
     envelope: { attack: 0.001, decay: 0.2, sustain: 0, release: 0.1 },
   }).connect(reverb);
-  drumSynth.volume.value = -2;
+  drumSynth.volume.value = -10;
   activeNodes.push(drumSynth);
 
   // ── Metal synth (hihat, openhat, crash, ride) ─────────────────────────────
@@ -130,28 +140,16 @@ export async function playMelody({
     resonance: 4000,
     octaves: 1.5,
   }).connect(reverb);
-  metalSynth.volume.value = -8;
+  metalSynth.volume.value = -18;
   activeNodes.push(metalSynth);
 
-  // ── Drum trigger map ──────────────────────────────────────────────────────
-  const drumTrigger = {
-    36: (time) => drumSynth.triggerAttackRelease('C1', '8n',  time), // kick
-    38: (time) => drumSynth.triggerAttackRelease('G1', '16n', time), // snare
-    37: (time) => drumSynth.triggerAttackRelease('A1', '32n', time), // rimshot
-    39: (time) => drumSynth.triggerAttackRelease('D1', '32n', time), // clap
-    50: (time) => drumSynth.triggerAttackRelease('G2', '8n',  time), // tom_hi
-    45: (time) => drumSynth.triggerAttackRelease('D2', '8n',  time), // tom_lo
-    42: (time) => metalSynth.triggerAttackRelease('32n', time),      // hihat
-    46: (time) => metalSynth.triggerAttackRelease('8n',  time),      // openhat
-    49: (time) => metalSynth.triggerAttackRelease('2n',  time),      // crash
-    51: (time) => metalSynth.triggerAttackRelease('16n', time),      // ride
-  };
+  // Step 2: Schedule all notes using `+` prefix for relative transport time ──
 
   // ── Schedule lead notes ───────────────────────────────────────────────────
   const leadNotes = lead?.notes ?? [];
   for (const note of leadNotes) {
     const freq     = Tone.Frequency(note.pitch, 'midi').toFrequency();
-    const duration = note.endTime - note.startTime;
+    const duration = (note.endTime - note.startTime) * timeScale;
     Tone.Transport.schedule(time => {
       leadSynth.triggerAttackRelease(freq, duration, time);
       const delayMs = Math.max(0, (time - Tone.now()) * 1000);
@@ -159,43 +157,50 @@ export async function playMelody({
         if (onNoteOn) onNoteOn(note.pitch);
         setTimeout(() => { if (onNoteOff) onNoteOff(note.pitch); }, duration * 1000);
       }, delayMs);
-    }, note.startTime);
+    }, `+${note.startTime * timeScale}`);
   }
 
   // ── Schedule counter notes ────────────────────────────────────────────────
   for (const note of (counter?.notes ?? [])) {
     const freq     = Tone.Frequency(note.pitch, 'midi').toFrequency();
-    const duration = note.endTime - note.startTime;
+    const duration = (note.endTime - note.startTime) * timeScale;
     Tone.Transport.schedule(time => {
       counterSynth.triggerAttackRelease(freq, duration, time);
-    }, note.startTime);
+    }, `+${note.startTime * timeScale}`);
   }
 
   // ── Schedule bass notes ───────────────────────────────────────────────────
   for (const note of (bass?.notes ?? [])) {
     const freq     = Tone.Frequency(note.pitch, 'midi').toFrequency();
-    const duration = note.endTime - note.startTime;
+    const duration = (note.endTime - note.startTime) * timeScale;
     Tone.Transport.schedule(time => {
       bassSynth.triggerAttackRelease(freq, duration, time);
-    }, note.startTime);
+    }, `+${note.startTime * timeScale}`);
   }
 
   // ── Schedule chord notes ──────────────────────────────────────────────────
   for (const note of (chords?.notes ?? [])) {
     const freq     = Tone.Frequency(note.pitch, 'midi').toFrequency();
-    const duration = note.endTime - note.startTime;
+    const duration = (note.endTime - note.startTime) * timeScale;
     Tone.Transport.schedule(time => {
       chordSynth.triggerAttackRelease(freq, duration, time);
-    }, note.startTime);
+    }, `+${note.startTime * timeScale}`);
   }
 
   // ── Schedule drum notes ───────────────────────────────────────────────────
-  for (const note of (drums?.notes ?? [])) {
-    const trigger = drumTrigger[note.pitch];
-    if (trigger) {
-      Tone.Transport.schedule(time => trigger(time), note.startTime);
-    }
-  }
+  (drums?.notes ?? []).forEach(note => {
+    Tone.Transport.schedule((t) => {
+      try {
+        if ([36, 38, 39, 37, 50, 45].includes(note.pitch)) {
+          const freqMap = { 36: 'C1', 38: 'G1', 39: 'D1', 37: 'A1', 50: 'G2', 45: 'D2' };
+          drumSynth.triggerAttackRelease(freqMap[note.pitch] ?? 'C1', '16n', t);
+        } else {
+          const durMap = { 42: '32n', 46: '8n', 49: '2n', 51: '16n' };
+          metalSynth.triggerAttackRelease(durMap[note.pitch] ?? '32n', t);
+        }
+      } catch (e) {}
+    }, `+${note.startTime * timeScale}`);
+  });
 
   // ── Detect last note end for onComplete ───────────────────────────────────
   const allEnds = [
@@ -209,8 +214,9 @@ export async function playMelody({
 
   Tone.Transport.schedule(() => {
     if (onComplete) onComplete();
-  }, lastEnd + 0.1);
+  }, `+${(lastEnd + 0.1) * timeScale}`);
 
+  // Step 3: Start transport after all notes are scheduled
   Tone.Transport.start();
 }
 
