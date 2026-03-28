@@ -1,4 +1,4 @@
-import { pickNextDuration, pickNextMelodyStep, generateChordSequence } from './MarkovEngine';
+import { composeWithClaude } from './ClaudeComposer';
 
 // ─── Music Theory Foundation ──────────────────────────────────────────────────
 
@@ -11,7 +11,6 @@ const MOOD_THEORY = {
     registers:  [60, 72],
     feel:       'bouncy',
     defaultBPM: 108,
-    description: 'Major scale — bright and energetic',
   },
   sad: {
     scale:      [0, 2, 3, 5, 7, 8, 10],
@@ -21,7 +20,6 @@ const MOOD_THEORY = {
     registers:  [52, 64],
     feel:       'slow',
     defaultBPM: 68,
-    description: 'Natural minor scale — melancholic and reflective',
   },
   jazz: {
     scale:      [0, 2, 3, 5, 7, 9, 10, 11],
@@ -31,7 +29,6 @@ const MOOD_THEORY = {
     registers:  [60, 72],
     feel:       'swing',
     defaultBPM: 112,
-    description: 'Bebop scale — complex and syncopated',
   },
   classical: {
     scale:      [0, 2, 4, 5, 7, 9, 11],
@@ -41,7 +38,6 @@ const MOOD_THEORY = {
     registers:  [60, 76],
     feel:       'flowing',
     defaultBPM: 96,
-    description: 'Major scale — structured and elegant',
   },
   lofi: {
     scale:      [0, 2, 3, 5, 7, 10],
@@ -51,7 +47,6 @@ const MOOD_THEORY = {
     registers:  [55, 67],
     feel:       'lazy',
     defaultBPM: 82,
-    description: 'Minor pentatonic — chill and hazy',
   },
   epic: {
     scale:      [0, 2, 3, 5, 7, 8, 11],
@@ -61,7 +56,6 @@ const MOOD_THEORY = {
     registers:  [55, 67],
     feel:       'driving',
     defaultBPM: 145,
-    description: 'Harmonic minor — cinematic and powerful',
   },
   romantic: {
     scale:      [0, 2, 4, 5, 7, 9, 11],
@@ -71,7 +65,6 @@ const MOOD_THEORY = {
     registers:  [60, 72],
     feel:       'flowing',
     defaultBPM: 84,
-    description: 'Major scale — warm and expressive',
   },
   mysterious: {
     scale:      [0, 1, 4, 5, 7, 8, 11],
@@ -81,7 +74,6 @@ const MOOD_THEORY = {
     registers:  [52, 64],
     feel:       'sparse',
     defaultBPM: 78,
-    description: 'Byzantine scale — dark and exotic',
   },
 };
 
@@ -104,18 +96,32 @@ const DRUM_NOTES = {
   ride:    51,
 };
 
-const BEAT = 0.5; // quarter note at 120 BPM reference
-const BAR  = BEAT * 4;
+// ─── Simple random helpers (used in algorithmic fallback only) ────────────────
+
+function pickRandomDuration(mood) {
+  const pool = MOOD_THEORY[mood]?.rhythm ?? [0.25, 0.5, 1.0];
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+function pickRandomStep() {
+  const steps = [-2, -1, 1, 2];
+  return steps[Math.floor(Math.random() * steps.length)];
+}
+
+function pickRandomChordDegrees(mood, slotCount) {
+  const scaleLen = MOOD_THEORY[mood]?.scale?.length ?? 7;
+  const seq = [];
+  for (let i = 0; i < slotCount; i++) {
+    seq.push(Math.floor(Math.random() * scaleLen));
+  }
+  return seq;
+}
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
-function drumHit(notes, pitch, time, velocity, jitter = 0.02) {
-  const t   = Math.max(0, time + (Math.random() * jitter - jitter / 2));
-  const vel = Math.max(1, Math.min(127, velocity + Math.floor(Math.random() * 17) - 8));
-  notes.push({ pitch, startTime: t, endTime: t + 0.05, velocity: vel });
+function hit(notes, pitch, time, velocity) {
+  notes.push({ pitch, startTime: time, endTime: time + 0.05, velocity });
 }
-
-// ─── buildChordVoicing ───────────────────────────────────────────────────────
 
 function buildChordVoicing(rootMidi, chordType) {
   const intervals = {
@@ -140,8 +146,6 @@ const CHORD_TYPE_MAP = {
   mysterious: ['minor',  'major',  'dim',    'minor' ],
 };
 
-// ─── buildScaleNotes ─────────────────────────────────────────────────────────
-
 function buildScaleNotes(mood, octaveRange) {
   const theory = MOOD_THEORY[mood];
   if (!theory) return [60];
@@ -156,23 +160,19 @@ function buildScaleNotes(mood, octaveRange) {
 }
 
 // ─── generateLeadMelody ──────────────────────────────────────────────────────
-// Uses Markov interval chain — each step is drawn from MELODY_STEP_TRANSITIONS.
-// Generates until minRawTime is filled so the actual playback hits ≥15s.
 
-function generateLeadMelody(mood, minRawTime) {
-  const theory = MOOD_THEORY[mood];
-  const scale  = buildScaleNotes(mood, 3).filter(
+function generateLeadMelody(mood) {
+  const theory     = MOOD_THEORY[mood];
+  const minRawTime = 15;
+  const scale      = buildScaleNotes(mood, 3).filter(
     n => n >= theory.registers[0] && n <= theory.registers[1]
   );
   if (!scale.length) return { notes: [], totalTime: minRawTime };
 
-  const notes    = [];
-  let time       = 0;
-  let prevPrev   = 0.5;
-  let prev       = 0.25;
-  let noteCount  = 0;
+  const notes   = [];
+  let time      = 0;
+  let noteCount = 0;
 
-  // Start in the lower third of the register
   const startPool = scale.filter(n => n >= theory.registers[0] && n <= theory.registers[0] + 7);
   const startNote = startPool.length > 0
     ? startPool[Math.floor(Math.random() * startPool.length)]
@@ -180,32 +180,20 @@ function generateLeadMelody(mood, minRawTime) {
   let scaleIdx = scale.indexOf(startNote);
   if (scaleIdx < 0) scaleIdx = Math.floor(scale.length * 0.3);
 
-  let lastStep = 1;
-
   while (time < minRawTime || noteCount < 8) {
-    const duration = pickNextDuration(prevPrev, prev, mood);
-    prevPrev = prev;
-    prev     = duration || 0.5;
+    const duration = pickRandomDuration(mood);
 
-    if (duration === 0) {
-      time += 0.5;
-      continue;
-    }
+    if (duration === 0) { time += 0.5; continue; }
 
-    // Markov interval step
-    let step   = pickNextMelodyStep(lastStep, mood);
+    let step   = pickRandomStep();
     let newIdx = scaleIdx + step;
-
-    // Boundary correction: reverse direction rather than hard-clamp
     if (newIdx < 0 || newIdx >= scale.length) {
       step   = -step;
       newIdx = scaleIdx + step;
     }
     newIdx   = Math.max(0, Math.min(scale.length - 1, newIdx));
     scaleIdx = newIdx;
-    lastStep = step || 1;
 
-    // Natural arc velocity: quiet at start and end, louder in the middle
     const progress = Math.min(time / minRawTime, 1);
     const arc      = Math.sin(Math.PI * progress);
     const velocity = Math.round(55 + arc * 45);
@@ -220,7 +208,6 @@ function generateLeadMelody(mood, minRawTime) {
     noteCount++;
   }
 
-  // Resolve to root
   const lastTime = notes[notes.length - 1]?.endTime ?? time;
   notes.push({ pitch: theory.root, startTime: lastTime, endTime: lastTime + 1.0, velocity: 65 });
 
@@ -228,7 +215,6 @@ function generateLeadMelody(mood, minRawTime) {
 }
 
 // ─── generateCounterMelody ───────────────────────────────────────────────────
-// Markov interval chain, lower register, slight time offset for counterpoint.
 
 function generateCounterMelody(mood, totalTime) {
   const theory = MOOD_THEORY[mood];
@@ -238,21 +224,14 @@ function generateCounterMelody(mood, totalTime) {
   if (!scale.length) return { notes: [], totalTime };
 
   const notes  = [];
-  let time     = 0.75; // offset for counterpoint feel
-  let prevPrev = 0.5;
-  let prev     = 0.5;
-
+  let time     = 0.75;
   let scaleIdx = Math.floor(scale.length * 0.4);
-  let lastStep = -1; // start descending — contrary motion to ascending lead
 
   while (time < totalTime * 0.85) {
-    const duration = pickNextDuration(prevPrev, prev, mood);
-    prevPrev = prev;
-    prev     = duration || 0.5;
-
+    const duration = pickRandomDuration(mood);
     if (duration === 0) { time += 0.5; continue; }
 
-    let step   = pickNextMelodyStep(lastStep, mood);
+    let step   = pickRandomStep();
     let newIdx = scaleIdx + step;
     if (newIdx < 0 || newIdx >= scale.length) {
       step   = -step;
@@ -260,7 +239,6 @@ function generateCounterMelody(mood, totalTime) {
     }
     newIdx   = Math.max(0, Math.min(scale.length - 1, newIdx));
     scaleIdx = newIdx;
-    lastStep = step || -1;
 
     notes.push({
       pitch:     scale[scaleIdx],
@@ -275,22 +253,21 @@ function generateCounterMelody(mood, totalTime) {
 }
 
 // ─── generateBassLine ────────────────────────────────────────────────────────
-// Follows the shared Markov chord sequence — root on the downbeat every 2s,
-// Markov rhythm decides whether a second note fills beat 2.
 
-function generateBassLine(mood, chordDegrees) {
-  const theory   = MOOD_THEORY[mood];
-  const bassRoot = theory.root - 24;
-  const notes    = [];
+function generateBassLine(mood, totalTime) {
+  const theory      = MOOD_THEORY[mood];
+  const bassRoot    = theory.root - 24;
+  const slotCount   = Math.ceil(totalTime / 2);
+  const degrees     = pickRandomChordDegrees(mood, slotCount);
+  const notes       = [];
 
-  for (let i = 0; i < chordDegrees.length; i++) {
-    const degree       = chordDegrees[i];
-    const interval     = theory.scale[degree % theory.scale.length];
-    const rootNote     = Math.max(28, Math.min(52, bassRoot + interval));
-    const slotStart    = i * 2.0;
+  for (let i = 0; i < degrees.length; i++) {
+    const degree    = degrees[i];
+    const interval  = theory.scale[degree % theory.scale.length];
+    const rootNote  = Math.max(28, Math.min(52, bassRoot + interval));
+    const slotStart = i * 2.0;
 
-    // Always play chord root on the downbeat
-    const dur1 = pickNextDuration(0.5, 0.5, mood);
+    const dur1 = pickRandomDuration(mood);
     notes.push({
       pitch:     rootNote,
       startTime: slotStart,
@@ -298,10 +275,8 @@ function generateBassLine(mood, chordDegrees) {
       velocity:  85 + Math.floor(Math.random() * 15),
     });
 
-    // Optional second bass note on beat 2 (Markov picks duration)
-    const dur2 = pickNextDuration(dur1, dur1, mood);
+    const dur2 = pickRandomDuration(mood);
     if (dur2 <= 1.0) {
-      // Fifth above root or second scale step — both harmonically safe
       const fifth  = rootNote + 7;
       const step2  = rootNote + (theory.scale[1] ?? 2);
       const pitch2 = Math.max(28, Math.min(52, Math.random() < 0.55 ? fifth : step2));
@@ -314,19 +289,20 @@ function generateBassLine(mood, chordDegrees) {
     }
   }
 
-  return { notes, totalTime: chordDegrees.length * 2.0 };
+  return { notes, totalTime };
 }
 
-// ─── buildChordsFromDegrees ───────────────────────────────────────────────────
-// Builds chord voicings from the shared Markov degree sequence.
+// ─── generateChordProgression ─────────────────────────────────────────────────
 
-function buildChordsFromDegrees(mood, degreeSequence, totalTime) {
+function generateChordProgression(mood, totalTime) {
   const theory     = MOOD_THEORY[mood];
   const chordTypes = CHORD_TYPE_MAP[mood] ?? CHORD_TYPE_MAP.happy;
+  const slotCount  = Math.ceil(totalTime / 2);
+  const degrees    = pickRandomChordDegrees(mood, slotCount);
   const notesArr   = [];
 
-  for (let i = 0; i < degreeSequence.length; i++) {
-    const degree        = degreeSequence[i];
+  for (let i = 0; i < degrees.length; i++) {
+    const degree        = degrees[i];
     const scaleInterval = theory.scale[degree % theory.scale.length];
     const rootMidi      = theory.root + scaleInterval;
     const chordType     = chordTypes[i % 4];
@@ -343,177 +319,89 @@ function buildChordsFromDegrees(mood, degreeSequence, totalTime) {
 }
 
 // ─── generateDrumPattern ─────────────────────────────────────────────────────
+// Exact pattern — no jitter, no randomness, consistent velocity:
+//   Kick  : every beat (1, 2, 3, 4)
+//   Snare : beats 2 and 4 only
+//   Hi-hat: every 8th note (2-step)
+//   No crash, no toms, no variation
 
-export function generateDrumPattern(drumStyle, totalTime) {
-  const notes = [];
-  const style = drumStyle ?? 'four_on_floor';
+export function generateDrumPattern(_drumStyle, totalTime) {
+  const notes  = [];
+  const EIGHTH = 0.25; // eighth note at 120 BPM reference
+  const BAR    = 2.0;  // 4 beats × 0.5
 
-  if (style === 'four_on_floor') {
-    const STEP = BEAT * 2;
-    let t = 0;
-    while (t < totalTime) {
-      drumHit(notes, DRUM_NOTES.kick,  t,               100);
-      drumHit(notes, DRUM_NOTES.hihat, t,                70);
-      drumHit(notes, DRUM_NOTES.hihat, t + BEAT * 0.5,  60);
-      drumHit(notes, DRUM_NOTES.snare, t + BEAT,         90);
-      drumHit(notes, DRUM_NOTES.hihat, t + BEAT,         70);
-      drumHit(notes, DRUM_NOTES.hihat, t + BEAT * 1.5,  55);
-      if (Math.random() < 0.2) {
-        drumHit(notes, DRUM_NOTES.kick, t + BEAT * 1.5, 80);
-      }
-      t += STEP;
-    }
+  const K = 100; // kick velocity
+  const S = 90;  // snare velocity
+  const H = 70;  // hihat velocity
 
-  } else if (style === 'driving') {
-    const STEP = BEAT * 2;
-    let t      = 0;
-    let stepNum = 0;
-    while (t < totalTime) {
-      const isBarAccent = stepNum % 8 === 0;
-      const isTomFill   = stepNum % 8 === 7;
-      drumHit(notes, DRUM_NOTES.kick,  t,               110);
-      drumHit(notes, DRUM_NOTES.kick,  t + BEAT * 0.25,  80);
-      drumHit(notes, DRUM_NOTES.hihat, t + BEAT * 0.5,   75);
-      drumHit(notes, DRUM_NOTES.snare, t + BEAT,         100);
-      if (isBarAccent) {
-        drumHit(notes, DRUM_NOTES.crash, t + BEAT,        90);
-      }
-      drumHit(notes, DRUM_NOTES.kick,  t + BEAT * 1.5,   95);
-      drumHit(notes, DRUM_NOTES.hihat, t + BEAT * 1.75,  65);
-      if (isTomFill) {
-        drumHit(notes, DRUM_NOTES.tom_hi, t + BEAT * 0.75, 80);
-        drumHit(notes, DRUM_NOTES.tom_lo, t + BEAT,         75);
-      }
-      t += STEP;
-      stepNum++;
-    }
+  let t = 0;
+  while (t < totalTime) {
+    // Beat 1
+    hit(notes, DRUM_NOTES.kick,  t + EIGHTH * 0, K);
+    hit(notes, DRUM_NOTES.hihat, t + EIGHTH * 0, H);
+    hit(notes, DRUM_NOTES.hihat, t + EIGHTH * 1, H);
+    // Beat 2
+    hit(notes, DRUM_NOTES.kick,  t + EIGHTH * 2, K);
+    hit(notes, DRUM_NOTES.snare, t + EIGHTH * 2, S);
+    hit(notes, DRUM_NOTES.hihat, t + EIGHTH * 2, H);
+    hit(notes, DRUM_NOTES.hihat, t + EIGHTH * 3, H);
+    // Beat 3
+    hit(notes, DRUM_NOTES.kick,  t + EIGHTH * 4, K);
+    hit(notes, DRUM_NOTES.hihat, t + EIGHTH * 4, H);
+    hit(notes, DRUM_NOTES.hihat, t + EIGHTH * 5, H);
+    // Beat 4
+    hit(notes, DRUM_NOTES.kick,  t + EIGHTH * 6, K);
+    hit(notes, DRUM_NOTES.snare, t + EIGHTH * 6, S);
+    hit(notes, DRUM_NOTES.hihat, t + EIGHTH * 6, H);
+    hit(notes, DRUM_NOTES.hihat, t + EIGHTH * 7, H);
 
-  } else if (style === 'jazz_brush') {
-    let t = 0;
-    while (t < totalTime) {
-      for (let i = 0; i < 8; i++) {
-        const rideVel = 55 + Math.floor(Math.random() * 16);
-        drumHit(notes, DRUM_NOTES.ride, t + i * BEAT * 0.5, rideVel);
-      }
-      drumHit(notes, DRUM_NOTES.hihat, t + BEAT * 1.0, 50);
-      drumHit(notes, DRUM_NOTES.hihat, t + BEAT * 3.0, 50);
-      for (const i of [1, 3, 5, 7]) {
-        if (Math.random() < 0.3) {
-          const ghostVel = 35 + Math.floor(Math.random() * 16);
-          drumHit(notes, DRUM_NOTES.snare, t + i * BEAT * 0.5, ghostVel);
-        }
-      }
-      const kickCount = 1 + Math.floor(Math.random() * 2);
-      for (let k = 0; k < kickCount; k++) {
-        const kickPos = Math.floor(Math.random() * 8) * BEAT * 0.5;
-        drumHit(notes, DRUM_NOTES.kick, t + kickPos, 65 + Math.floor(Math.random() * 16));
-      }
-      t += BAR;
-    }
-
-  } else if (style === 'lofi_beat') {
-    const STEP = BEAT * 2;
-    let t = 0;
-    while (t < totalTime) {
-      drumHit(notes, DRUM_NOTES.kick,  t,                 85, 0.04);
-      drumHit(notes, DRUM_NOTES.snare, t + BEAT + 0.05,   75, 0.04);
-      for (let i = 0; i < 4; i++) {
-        const hatVel = 45 + Math.floor(Math.random() * 16);
-        drumHit(notes, DRUM_NOTES.hihat, t + i * BEAT * 0.5, hatVel, 0.04);
-      }
-      if (Math.random() < 0.35) {
-        drumHit(notes, DRUM_NOTES.kick, t + BEAT * 1.5, 70, 0.04);
-      }
-      t += STEP;
-    }
-
-  } else if (style === 'soft_brush') {
-    const STEP = BEAT * 2;
-    let t = 0;
-    while (t < totalTime) {
-      drumHit(notes, DRUM_NOTES.kick,    t,               55);
-      drumHit(notes, DRUM_NOTES.rimshot, t + BEAT,        45);
-      drumHit(notes, DRUM_NOTES.hihat,   t + BEAT * 0.5,  35);
-      drumHit(notes, DRUM_NOTES.hihat,   t + BEAT * 1.5,  35);
-      t += STEP;
-    }
-
-  } else if (style === 'sparse_ambient') {
-    const STEP = BAR * 2;
-    let t      = 0;
-    let patNum = 0;
-    while (t < totalTime) {
-      const tomPos = Math.random() * Math.max(0.1, STEP - 0.1);
-      drumHit(notes, DRUM_NOTES.tom_lo, t + tomPos, 60);
-      if (patNum % 2 === 0) {
-        drumHit(notes, DRUM_NOTES.crash, t + STEP * 0.5, 40);
-      }
-      const rimPos = Math.random() * Math.max(0.1, STEP - 0.1);
-      drumHit(notes, DRUM_NOTES.rimshot, t + rimPos, 30 + Math.floor(Math.random() * 16));
-      t += STEP;
-      patNum++;
-    }
-
-  } else {
-    // Fallback: four_on_floor
-    const STEP = BEAT * 2;
-    let t = 0;
-    while (t < totalTime) {
-      drumHit(notes, DRUM_NOTES.kick,  t,               100);
-      drumHit(notes, DRUM_NOTES.hihat, t,                70);
-      drumHit(notes, DRUM_NOTES.hihat, t + BEAT * 0.5,  60);
-      drumHit(notes, DRUM_NOTES.snare, t + BEAT,         90);
-      drumHit(notes, DRUM_NOTES.hihat, t + BEAT,         70);
-      drumHit(notes, DRUM_NOTES.hihat, t + BEAT * 1.5,  55);
-      t += STEP;
-    }
+    t += BAR;
   }
 
   return { notes, totalTime };
 }
 
 // ─── generateMelody ──────────────────────────────────────────────────────────
-// Chord sequence is generated once and shared by chords + bass so they stay
-// in sync. Lead and counter both use the Markov interval chain.
 
-export async function generateMelody({ mood, drumStyle, layers, tempo }) {
-  const m   = mood  ?? 'happy';
-  const bpm = tempo ?? 120;
+export async function generateMelody({ mood, drumStyle, theme, tempo }) {
 
-  // Compute how many raw-time seconds are needed to reach ≥15 actual seconds.
-  // Raw times are expressed at 120 BPM; Playback.js scales by 120/bpm.
-  const minRawTime = Math.max(15, 15 * bpm / 120);
+  // 1. Try Claude first — always
+  console.log('[MelodyAI] Calling Claude API...')
+  const claudeResult = await composeWithClaude(theme ?? mood, mood, tempo ?? 120)
 
-  const lead = generateLeadMelody(m, minRawTime);
-  const totalTime = lead.totalTime;
+  let lead, counter, bass, chords
 
-  // Single Markov chord sequence — drives both chords and bass
-  const slotCount    = Math.ceil(totalTime / 2);
-  const chordDegrees = generateChordSequence(m, slotCount);
-
-  const counter = generateCounterMelody(m, totalTime);
-  const bass    = generateBassLine(m, chordDegrees);
-  const chords  = buildChordsFromDegrees(m, chordDegrees, totalTime);
-  const drums   = generateDrumPattern(drumStyle ?? 'four_on_floor', totalTime);
-
-  console.log('[MelodyAI] Generated', {
-    mood:         m,
-    bpm,
-    drumStyle:    drumStyle ?? 'four_on_floor',
-    layers:       layers    ?? 'standard',
-    scale:        MOOD_THEORY[m].description,
-    leadNotes:    lead.notes?.length ?? 0,
-    counterNotes: counter.notes.length,
-    bassNotes:    bass.notes.length,
-    chordNotes:   chords.notes.length,
-    drumNotes:    drums.notes.length,
-    rawTime:      totalTime.toFixed(2) + 's',
-    actualTime:   (totalTime * 120 / bpm).toFixed(2) + 's',
-  });
-
-  if (layers === 'minimal') {
-    return { lead, counter: null, bass: null, chords, drums };
+  if (claudeResult) {
+    // Claude succeeded — normalize absolute-second times to 120 BPM reference
+    // so Playback.js timeScale doesn't double-scale them
+    const bpmFactor = (tempo ?? 120) / 120
+    const normalize = (layer) => ({
+      notes: layer.notes.map(n => ({
+        ...n,
+        startTime: n.startTime * bpmFactor,
+        endTime:   n.endTime   * bpmFactor,
+      })),
+      totalTime: layer.totalTime * bpmFactor,
+    })
+    lead    = normalize(claudeResult.lead)
+    counter = normalize(claudeResult.counter)
+    bass    = normalize(claudeResult.bass)
+    chords  = normalize(claudeResult.chords)
+    console.log('[MelodyAI] Using Claude composition')
+  } else {
+    // Claude failed — fall back to algorithmic only as last resort
+    console.warn('[MelodyAI] Claude failed — using algorithmic fallback')
+    lead    = generateLeadMelody(mood)
+    counter = generateCounterMelody(mood, lead.totalTime)
+    bass    = generateBassLine(mood, lead.totalTime)
+    chords  = generateChordProgression(mood, lead.totalTime)
   }
 
-  return { lead, counter, bass, chords, drums };
+  // Drums always algorithmic regardless
+  const drums = generateDrumPattern(drumStyle ?? 'four_on_floor', lead.totalTime)
+
+  return {
+    lead, counter, bass, chords, drums,
+    source: claudeResult ? 'claude' : 'algorithmic'
+  }
 }

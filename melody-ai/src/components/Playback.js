@@ -17,10 +17,11 @@ export async function playMelody({
   onNoteOff,
   onComplete,
 }) {
-  try { await Tone.start(); } catch (e) { console.warn('Tone.start failed', e); }
+  await Tone.start();
 
   Tone.Transport.cancel();
   Tone.Transport.stop();
+  activeNodes.forEach(node => { try { node.dispose(); } catch (_) {} });
 
   // Step 1: set BPM before scheduling anything
   Tone.Transport.bpm.value = tempo ?? 120;
@@ -118,7 +119,7 @@ export async function playMelody({
     oscillator: { type: 'triangle' },
     envelope: { attack: 0.15, decay: 0.5, sustain: 0.5, release: 1.2 },
   });
-  chordSynth.volume.value = -20;
+  chordSynth.volume.value = -10;
   chordSynth.connect(dist ?? filter);
   activeNodes.push(chordSynth);
 

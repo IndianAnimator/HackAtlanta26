@@ -23,8 +23,9 @@ export default function App() {
   const [bass,           setBass]           = useState(null);
   const [chords,         setChords]         = useState(null);
   const [drums,          setDrums]          = useState(null);
-  const [activeNote,     setActiveNote]     = useState(null);
-  const [synthPatch,     setSynthPatch]     = useState(null);
+  const [activeNote,        setActiveNote]        = useState(null);
+  const [synthPatch,        setSynthPatch]        = useState(null);
+  const [generationSource,  setGenerationSource]  = useState(null);
 
   const debounceRef = useRef(null);
 
@@ -53,13 +54,14 @@ export default function App() {
       const activeDrumStyle = themeProfile?.drumStyle ?? 'four_on_floor';
       const activeLayers    = themeProfile?.layers    ?? 'standard';
 
-      const patch = generateSynthPatch(activeMood);
+      const patch = await generateSynthPatch(activeMood);
       setSynthPatch(patch);
 
       const result = await generateMelody({
         mood:      activeMood,
         drumStyle: activeDrumStyle,
         layers:    activeLayers,
+        theme:     theme,
         tempo,
       });
 
@@ -68,6 +70,7 @@ export default function App() {
       setBass(result.bass);
       setChords(result.chords);
       setDrums(result.drums);
+      setGenerationSource(result.source);
     } catch (err) {
       console.error('handleGenerate error:', err);
     } finally {
@@ -79,18 +82,23 @@ export default function App() {
   async function handlePlay() {
     setIsPlaying(true);
     setActiveNote(null);
-    await playMelody({
-      lead,
-      counter,
-      bass,
-      chords,
-      drums,
-      tempo,
-      synthPatch,
-      onNoteOn:   pitch => setActiveNote(pitch),
-      onNoteOff:  ()    => setActiveNote(null),
-      onComplete: ()    => setIsPlaying(false),
-    });
+    try {
+      await playMelody({
+        lead,
+        counter,
+        bass,
+        chords,
+        drums,
+        tempo,
+        synthPatch,
+        onNoteOn:   pitch => setActiveNote(pitch),
+        onNoteOff:  ()    => setActiveNote(null),
+        onComplete: ()    => setIsPlaying(false),
+      });
+    } catch (err) {
+      console.error('playMelody error:', err);
+      setIsPlaying(false);
+    }
   }
 
   // ── Stop ─────────────────────────────────────────────────────────────────
@@ -107,7 +115,7 @@ export default function App() {
 
       {/* ── Header ─────────────────────────────────────────────────────────── */}
       <header className={styles.header}>
-        <div className={styles.badge}>Generative AI · Markov Chain</div>
+        <div className={styles.badge}>Generative AI · Claude API</div>
         <h1 className={styles.title}>🎵 AI Melody Generator</h1>
         <p className={styles.subtitle}>
           Describe a theme and let AI compose music for your scene
@@ -195,6 +203,23 @@ export default function App() {
                 <span className={styles.macroVal}>{Math.round(synthPatch.macros.space * 100)}%</span>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* ── Generation source badge ───────────────────────────────────────── */}
+        {generationSource && (
+          <div style={{
+            display: 'inline-block',
+            padding: '6px 14px',
+            borderRadius: '20px',
+            fontSize: '13px',
+            fontWeight: 600,
+            marginBottom: '12px',
+            background: generationSource === 'claude' ? 'rgba(34,197,94,0.12)' : 'rgba(251,191,36,0.12)',
+            color:       generationSource === 'claude' ? '#22c55e' : '#f59e0b',
+            border: `1px solid ${generationSource === 'claude' ? 'rgba(34,197,94,0.3)' : 'rgba(251,191,36,0.3)'}`,
+          }}>
+            {generationSource === 'claude' ? '🤖 Composed by Claude AI' : '⚙️ Algorithmic fallback — Claude unavailable'}
           </div>
         )}
 
